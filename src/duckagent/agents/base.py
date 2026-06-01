@@ -67,6 +67,16 @@ class BaseAgent:
                 await self.on_message(msg)
             except Exception as e:
                 logger.error("agent_error", agent_id=self.agent_id, error=str(e))
+                await self._broadcast_status("idle", task_summary=f"错误: {e}")
+                await self.bus.publish(Message(
+                    from_agent=self.agent_id,
+                    to_agent="human",
+                    type="conclusion",
+                    content=f"❌ 处理消息时出错: {e}",
+                    evidence=[str(msg.id)],
+                    confidence="low",
+                    reply_to=msg.id,
+                ))
 
     async def on_message(self, msg: Message) -> None:
         """Handle an incoming message. Subclasses must override this."""
