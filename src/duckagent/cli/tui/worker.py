@@ -13,6 +13,8 @@ async def consume_human_queue(app: App, queue: asyncio.Queue[Message]) -> None:
     """Consume messages addressed to human and render them in the #messages panel."""
     while True:
         msg = await queue.get()
+        if msg.type == "status":
+            continue
         container = app.query_one("#messages", VerticalScroll)
         widget = MessageWidget(msg)
         container.mount(widget)
