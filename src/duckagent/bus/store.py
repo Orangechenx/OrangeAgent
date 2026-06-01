@@ -48,7 +48,8 @@ class MessageBus:
         self._subscribers.pop(agent_id, None)
 
     async def publish(self, msg: Message) -> None:
-        await self._persist(msg)
+        if msg.type != "status":
+            await self._persist(msg)
         self._dispatch(msg)
 
     async def get_history(

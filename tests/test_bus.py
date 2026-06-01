@@ -180,6 +180,27 @@ async def test_get_history_filter_by_agent(bus):
 
 
 @pytest.mark.asyncio
+async def test_status_message_not_persisted(tmp_path):
+    bus = MessageBus(db_path=tmp_path / "test.db")
+    await bus.initialize()
+
+    msg = Message(
+        from_agent="main_agent",
+        to_agent=None,
+        type="status",
+        content='{"state": "thinking"}',
+        evidence=[],
+        confidence="high",
+    )
+    await bus.publish(msg)
+
+    history = await bus.get_history(limit=100)
+    assert len(history) == 0
+
+    await bus.close()
+
+
+@pytest.mark.asyncio
 async def test_persistence_across_instances(tmp_path):
     db_path = tmp_path / "persist.db"
 
