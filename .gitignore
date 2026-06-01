@@ -10,3 +10,9 @@ CLAUDE.md
 
 # Virtual environments
 .venv
+
+# Secrets
+.env
+
+# Runtime data
+.duckagent/
