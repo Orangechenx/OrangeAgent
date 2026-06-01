@@ -21,7 +21,7 @@ class DuckApp(App):
     TITLE = "DuckAgent"
     BINDINGS = [
         ("ctrl+l", "clear_messages", "清屏"),
-        ("ctrl+c", "quit", "退出"),
+        ("ctrl+q", "quit", "退出"),
     ]
 
     def __init__(self) -> None:
