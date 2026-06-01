@@ -158,3 +158,46 @@ async def test_main_agent_responds_to_human(bus, agent_md):
         received = await asyncio.wait_for(human_queue.get(), timeout=2.0)
         assert received.from_agent == "main_agent"
         await agent.stop()
+
+
+# --- TraceAgent tests ---
+
+from duckagent.agents.trace_agent import TraceAgent
+
+
+@pytest.mark.asyncio
+async def test_trace_agent_analyzes_request(bus, tmp_path):
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+
+    with patch("duckagent.agents.base.litellm.acompletion") as mock_llm:
+        mock_llm.return_value = AsyncMock(
+            choices=[AsyncMock(message=AsyncMock(
+                content="Identified AES-128-CBC. The aese instruction at line 42 confirms AES encryption."
+            ))]
+        )
+
+        agent = TraceAgent(
+            bus=bus,
+            model="test-model",
+            prompts_dir=prompts_dir,
+            verify_enabled=False,
+        )
+        await agent.start()
+
+        main_queue = bus.subscribe("main_agent")
+
+        await bus.publish(Message(
+            from_agent="main_agent",
+            to_agent="trace_agent",
+            type="request",
+            content="分析以下 trace 片段:\nline 42: 0x7a3c00 | aese v0.16b, v1.16b | v0=00112233...",
+            evidence=[],
+            confidence="high",
+        ))
+
+        received = await asyncio.wait_for(main_queue.get(), timeout=2.0)
+        assert received.from_agent == "trace_agent"
+        assert received.type == "conclusion"
+        assert "AES" in received.content
+        await agent.stop()
