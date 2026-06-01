@@ -145,6 +145,7 @@ async def _display_messages(queue: asyncio.Queue, thinking_event: asyncio.Event)
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
         typer.echo(format_message(msg))
+        typer.echo(_SEPARATOR)
 
 
 async def _spinner(thinking_event: asyncio.Event):
@@ -162,9 +163,7 @@ async def _input_loop(bus: MessageBus, thinking_event: asyncio.Event):
     loop = asyncio.get_event_loop()
     while True:
         try:
-            typer.echo(_SEPARATOR)
             line = await loop.run_in_executor(None, lambda: input("> "))
-            typer.echo(_SEPARATOR)
         except EOFError:
             break
 
@@ -172,6 +171,7 @@ async def _input_loop(bus: MessageBus, thinking_event: asyncio.Event):
         if not line:
             continue
 
+        typer.echo(_SEPARATOR)
         thinking_event.set()
 
         msg = Message(
