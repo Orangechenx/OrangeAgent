@@ -38,3 +38,60 @@ def test_hard_verify_skips_non_conclusion():
         confidence="high",
     )
     hard_verify(msg)
+
+
+# --- Self-check tests ---
+
+from unittest.mock import AsyncMock, patch
+from duckagent.verify.self_check import self_check, CheckResult
+
+
+@pytest.mark.asyncio
+async def test_self_check_passes():
+    msg = Message(
+        from_agent="trace_agent",
+        to_agent="main_agent",
+        type="conclusion",
+        content="AES-128-CBC identified",
+        evidence=["line 42: aese v0.16b, v1.16b"],
+        confidence="high",
+    )
+    with patch("duckagent.verify.self_check.litellm.acompletion") as mock:
+        mock.return_value = AsyncMock(
+            choices=[AsyncMock(message=AsyncMock(content="PASS: reasoning is sound"))]
+        )
+        result = await self_check(msg, model="test-model")
+    assert result.passed is True
+
+
+@pytest.mark.asyncio
+async def test_self_check_fails():
+    msg = Message(
+        from_agent="trace_agent",
+        to_agent="main_agent",
+        type="conclusion",
+        content="AES-128-CBC identified",
+        evidence=["line 42: aese v0.16b, v1.16b"],
+        confidence="high",
+    )
+    with patch("duckagent.verify.self_check.litellm.acompletion") as mock:
+        mock.return_value = AsyncMock(
+            choices=[AsyncMock(message=AsyncMock(content="FAIL: evidence insufficient, line 42 only shows one round"))]
+        )
+        result = await self_check(msg, model="test-model")
+    assert result.passed is False
+    assert "insufficient" in result.reason
+
+
+@pytest.mark.asyncio
+async def test_self_check_skips_non_conclusion():
+    msg = Message(
+        from_agent="main_agent",
+        to_agent="trace_agent",
+        type="request",
+        content="Analyze this",
+        evidence=[],
+        confidence="high",
+    )
+    result = await self_check(msg, model="test-model")
+    assert result.passed is True
