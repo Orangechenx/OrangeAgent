@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import Footer, Header
 
@@ -20,8 +21,8 @@ class DuckApp(App):
     CSS_PATH = str(Path(__file__).parent / "app.tcss")
     TITLE = "DuckAgent"
     BINDINGS = [
-        ("ctrl+l", "clear_messages", "清屏"),
-        ("ctrl+d", "quit", "退出"),
+        Binding("ctrl+l", "clear_messages", "清屏"),
+        Binding("ctrl+d", "quit", "退出", priority=True),
     ]
 
     def __init__(self) -> None:
@@ -101,6 +102,11 @@ class DuckApp(App):
         container.mount(MessageWidget(msg))
         container.scroll_end(animate=False)
         asyncio.create_task(self._bus.publish(msg))
+
+    def on_key(self, event) -> None:
+        """Global key handler — Ctrl+D quits even when TextArea is focused."""
+        if event.key == "ctrl+d":
+            self.exit()
 
     def action_clear_messages(self) -> None:
         container = self.query_one("#messages", VerticalScroll)
