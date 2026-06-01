@@ -1,17 +1,12 @@
+* {
+    background: transparent;
+}
+
 Screen {
     layout: grid;
     grid-size: 2 2;
     grid-columns: 7fr 3fr;
     grid-rows: 1fr auto;
-    background: transparent;
-}
-
-Header {
-    background: transparent;
-}
-
-Footer {
-    background: transparent;
 }
 
 #messages {
@@ -28,9 +23,10 @@ Footer {
 
 InputArea {
     column-span: 2;
+    max-height: 6;
 }
 
 InputArea TextArea {
     min-height: 1;
-    max-height: 10;
+    max-height: 4;
 }
