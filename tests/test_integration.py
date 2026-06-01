@@ -42,9 +42,10 @@ async def test_full_flow_human_to_trace_and_back(system):
 
     # Response 1: main_agent receives human request, delegates to trace_agent
     main_response = (
-        '{"action": "delegate", "to": "trace_agent", '
-        '"content": "分析以下 trace 中的加密算法:\\nline 3: aese v0.16b, v1.16b\\nline 4: aesmc v0.16b, v0.16b", '
-        '"type": "request", "evidence": [], "confidence": "high"}'
+        ">>> DELEGATE TO trace_agent\n"
+        "分析以下 trace 中的加密算法:\n"
+        "line 3: aese v0.16b, v1.16b\n"
+        "line 4: aesmc v0.16b, v0.16b"
     )
     # Response 2: trace_agent analyzes and responds
     trace_response = (
@@ -53,11 +54,9 @@ async def test_full_flow_human_to_trace_and_back(system):
     )
     # Response 3: main_agent receives trace conclusion, responds to human
     main_summary = (
-        '{"action": "respond", "to": "human", '
-        '"content": "Trace 分析结果：检测到 AES-128 加密算法，证据在 line 3-4。", '
-        '"type": "conclusion", '
-        '"evidence": ["line 3: aese instruction", "line 4: aesmc instruction"], '
-        '"confidence": "high"}'
+        "Trace 分析结果：检测到 AES-128 加密算法。\n\n"
+        "证据：\n- line 3: aese 指令\n- line 4: aesmc 指令\n\n"
+        "这是典型的 AES-128 加密实现。"
     )
 
     call_count = {"n": 0}
@@ -116,3 +115,14 @@ async def test_full_flow_human_to_trace_and_back(system):
 
         await main_agent.stop()
         await trace_agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_main_agent_delegate_marker():
+    """Test that >>> DELEGATE TO trace_agent triggers delegation."""
+    # Verify the marker regex works
+    import re
+    marker = ">>> DELEGATE TO trace_agent\n分析 trace 数据"
+    match = re.match(r">>>\s*DELEGATE\s+TO\s+(\w+)", marker)
+    assert match is not None
+    assert match.group(1) == "trace_agent"

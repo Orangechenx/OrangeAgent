@@ -1,4 +1,3 @@
-import json
 import re
 from pathlib import Path
 
@@ -13,13 +12,12 @@ _ROUTING_INSTRUCTION = """
 
 ## 回复格式
 
-你必须以纯 JSON 格式回复（不要用 markdown code block 包裹），包含以下字段：
-{"action": "respond|delegate", "to": "目标agent或human", "content": "消息内容", "type": "conclusion|request|question", "evidence": [...], "confidence": "high|medium|low"}
+请用自然语言回复，使用 markdown 格式组织内容。
 
-- action=respond: 直接回复
-- action=delegate: 转发给其他 agent（拆解成具体问题）
+如果你的分析和决策需要 trace_agent 来执行 trace 分析（搜索、查看代码/内存/调用日志），在第一行加上：
+>>> DELEGATE TO trace_agent
 
-重要：直接输出 JSON，不要加 ```json 标记。
+然后下面写你要委托的具体分析任务。否则正常回复即可，不需要任何特殊标记。
 """
 
 
@@ -54,99 +52,54 @@ class MainAgent(BaseAgent):
         )
 
     async def on_message(self, msg: Message) -> None:
-        """Handle incoming message: think, parse JSON response, and route."""
+        """Handle incoming message: think, route by delegation marker."""
         response = await self.think(
             f"[来自 {msg.from_agent}] (type={msg.type}): {msg.content}"
         )
 
-        parsed = self._parse_json_response(response)
-        if parsed is None:
-            logger.warning(
-                "main_agent_non_json_response",
-                response_preview=response[:100],
-            )
-            # Try to extract meaningful content even from broken JSON
-            content = self._extract_content(response)
+        # Check for delegation marker
+        delegate_match = re.match(r">>>\s*DELEGATE\s+TO\s+(\w+)", response)
+        if delegate_match:
+            target = delegate_match.group(1)
+            # Remove the marker line from the delegated content
+            task_content = response[delegate_match.end():].strip()
+            if not task_content:
+                task_content = msg.content
             await self.send(
-                to=msg.from_agent if msg.from_agent != "human" else "human",
-                content=content,
-                type="conclusion",
-                evidence=["model response"],
-                confidence="medium",
+                to=target,
+                content=task_content,
+                type="request",
+                evidence=[msg.id] if msg.id else [],
+                confidence="high",
                 reply_to=msg.id,
             )
             return
 
+        # No delegation — always respond to human
+        content = self._strip_json_artifacts(response)
         await self.send(
-            to=parsed.get("to"),
-            content=parsed.get("content", response),
-            type=parsed.get("type", "conclusion"),
-            evidence=parsed.get("evidence", []),
-            confidence=parsed.get("confidence", "medium"),
+            to="human",
+            content=content,
+            type="conclusion",
+            evidence=["model response"],
+            confidence="medium",
             reply_to=msg.id,
         )
 
     @staticmethod
-    def _extract_content(text: str) -> str:
-        """Try to pull the 'content' field out of a broken/malformed JSON response.
-
-        Falls back to stripping JSON-looking prefixes and code fences.
-        """
-        # Try to find "content": "..." anywhere in the text
-        content_match = re.search(
-            r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL
-        )
-        if content_match:
-            # Unescape JSON escapes
-            raw = content_match.group(1)
-            try:
-                return raw.encode().decode("unicode_escape")
-            except Exception:
-                return raw
-
-        # If the whole thing looks like JSON, don't show raw JSON to user
+    def _strip_json_artifacts(text: str) -> str:
+        """Remove JSON code blocks or raw JSON objects from display text."""
+        # Remove ```json ... ``` blocks entirely
+        text = re.sub(r"```(?:json)?\s*\n?\{[^`]*\}\n?\s*```", "", text, flags=re.DOTALL)
+        # If the ENTIRE response is a JSON object, replace with a clean message
         stripped = text.strip()
         if stripped.startswith("{") and stripped.endswith("}"):
-            return "模型返回了无法解析的路由指令，请重试。"
-
-        # Strip code fences and return the rest
-        cleaned = re.sub(r"```(?:json)?\s*", "", stripped)
-        return cleaned.strip() or text[:200]
-
-    @staticmethod
-    def _parse_json_response(text: str) -> dict | None:
-        """Try to parse JSON from response, handling markdown code blocks."""
-        text = text.strip()
-
-        # Attempt 1: raw JSON
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # Attempt 2: find JSON in code block
-        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1).strip())
-            except json.JSONDecodeError:
-                pass
-
-        # Attempt 3: find JSON object by locating "action" key (DS4 wraps JSON in prose)
-        idx = text.find('"action"')
-        if idx > 0:
-            # Find the enclosing braces
-            start = text.rfind("{", 0, idx)
-            end = text.find("}", idx)
-            if start >= 0 and end > start:
+            # Try to extract "content" field as last resort
+            m = re.search(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', stripped)
+            if m:
                 try:
-                    return json.loads(text[start:end + 1])
-                except json.JSONDecodeError:
+                    return m.group(1).encode().decode("unicode_escape")
+                except Exception:
                     pass
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                pass
-
-        return None
+            return "收到回复，但格式异常，请重新提问。"
+        return stripped
