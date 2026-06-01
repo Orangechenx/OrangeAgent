@@ -1,6 +1,6 @@
 import pytest
 from typer.testing import CliRunner
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, AsyncMock
 
 from duckagent.cli.app import app
 
@@ -18,7 +18,7 @@ def test_cli_help():
 def test_cli_run_help():
     result = runner.invoke(app, ["run", "--help"])
     assert result.exit_code == 0
-    assert "启动" in result.stdout or "交互" in result.stdout
+    assert "TUI" in result.stdout or "交互" in result.stdout
 
 
 def test_cli_log_help():
