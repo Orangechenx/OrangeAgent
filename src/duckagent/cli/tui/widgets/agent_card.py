@@ -18,7 +18,6 @@ class AgentCard(Widget):
         min-height: 5;
         margin: 0 0 1 0;
         padding: 1;
-        border: solid $surface-lighten-2;
     }
     AgentCard .agent-name {
         text-style: bold;
