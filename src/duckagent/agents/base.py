@@ -1,4 +1,6 @@
 import asyncio
+import json
+from typing import Any
 
 import litellm
 import structlog
@@ -31,7 +33,7 @@ class BaseAgent:
         self.model = model
         self.verify_enabled = verify_enabled
         self.verify_max_retries = verify_max_retries
-        self.context: list[dict[str, str]] = [
+        self.context: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
         ]
         self._queue: asyncio.Queue[Message] | None = None
@@ -68,18 +70,52 @@ class BaseAgent:
         """Handle an incoming message. Subclasses must override this."""
         raise NotImplementedError
 
-    async def think(self, input_text: str) -> str:
-        """Call the LLM with accumulated context and return the response."""
+    async def think(self, input_text: str, *, tools: list[dict] | None = None,
+                    tool_executor: Any = None, max_iterations: int = 50) -> str:
+        """Call the LLM with accumulated context and return the response.
+
+        If tools and tool_executor are provided, enters an agentic loop:
+        the model can call tools, results are appended to context, and the
+        model is called again until it produces a final text response.
+        """
         self.context.append({"role": "user", "content": input_text})
 
-        response = await litellm.acompletion(
-            model=self.model,
-            messages=self.context,
-        )
+        for _ in range(max_iterations):
+            kwargs: dict[str, Any] = {"model": self.model, "messages": self.context}
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
 
-        reply = response.choices[0].message.content
-        self.context.append({"role": "assistant", "content": reply})
-        return reply
+            response = await litellm.acompletion(**kwargs)
+            message = response.choices[0].message
+
+            assistant_entry: dict[str, Any] = {"role": "assistant", "content": message.content or ""}
+            tool_calls = getattr(message, "tool_calls", None)
+            if tool_calls:
+                assistant_entry["tool_calls"] = [
+                    tc.model_dump() if hasattr(tc, "model_dump") else tc
+                    for tc in tool_calls
+                ]
+            self.context.append(assistant_entry)
+
+            if not tool_calls:
+                return message.content or ""
+
+            if not tool_executor:
+                return message.content or ""
+
+            for tc in tool_calls:
+                name = tc.function.name
+                arguments = json.loads(tc.function.arguments)
+                result = tool_executor.execute(name, arguments)
+                self.context.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": name,
+                    "content": result,
+                })
+
+        return "Reached max iterations without final answer."
 
     async def send(
         self,

@@ -4,6 +4,7 @@ from pathlib import Path
 import structlog
 
 from duckagent.bus import Message
+from duckagent.tools import LocalTraceToolExecutor, TRACE_TOOLS
 from .base import BaseAgent
 
 logger = structlog.get_logger()
@@ -12,9 +13,8 @@ logger = structlog.get_logger()
 class TraceAgent(BaseAgent):
     """Agent specialized in analyzing ARM64 execution traces.
 
-    Receives trace analysis requests, calls the LLM to identify algorithms
-    and data flows, extracts evidence references (line numbers), assesses
-    confidence, and sends back a conclusion.
+    When trace files are provided, uses tool calling (trace_search, trace_context,
+    trace_cross_ref) to navigate large trace files autonomously.
     """
 
     def __init__(
@@ -22,6 +22,7 @@ class TraceAgent(BaseAgent):
         bus,
         model: str,
         prompts_dir: Path,
+        trace_files: dict[str, Path] | None = None,
         verify_enabled: bool = True,
         verify_max_retries: int = 3,
     ) -> None:
@@ -37,12 +38,29 @@ class TraceAgent(BaseAgent):
             verify_max_retries=verify_max_retries,
         )
 
+        self._executor: LocalTraceToolExecutor | None = None
+        self._tools: list[dict] | None = None
+        if trace_files:
+            existing = {k: v for k, v in trace_files.items() if v.exists()}
+            if existing:
+                self._executor = LocalTraceToolExecutor(existing)
+                self._tools = TRACE_TOOLS
+
+    async def stop(self) -> None:
+        if self._executor:
+            self._executor.close()
+        await super().stop()
+
     async def on_message(self, msg: Message) -> None:
         """Handle incoming messages. Only processes type='request'."""
         if msg.type != "request":
             return
 
-        response = await self.think(msg.content)
+        response = await self.think(
+            msg.content,
+            tools=self._tools,
+            tool_executor=self._executor,
+        )
 
         evidence = self._extract_evidence(response)
 
