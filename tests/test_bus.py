@@ -29,6 +29,18 @@ def test_message_broadcast():
     assert msg.to_agent is None
 
 
+def test_message_status_type():
+    msg = Message(
+        from_agent="main_agent",
+        to_agent=None,
+        type="status",
+        content='{"state": "thinking", "task_summary": "分析请求"}',
+        evidence=[],
+        confidence="high",
+    )
+    assert msg.type == "status"
+
+
 def test_message_invalid_type():
     with pytest.raises(ValueError):
         Message(
