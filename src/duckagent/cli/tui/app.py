@@ -10,10 +10,9 @@ from duckagent.agents.trace_agent import TraceAgent
 from duckagent.bus.store import MessageBus
 from duckagent.bus.models import Message
 from duckagent.config import settings
-from duckagent.cli.tui.widgets.agent_card import AgentCard
 from duckagent.cli.tui.widgets.input_area import InputArea
 from duckagent.cli.tui.widgets.message import MessageWidget
-from duckagent.cli.tui.worker import consume_human_queue, consume_status_queue
+from duckagent.cli.tui.worker import consume_human_queue
 
 
 class DuckApp(App):
@@ -29,21 +28,15 @@ class DuckApp(App):
         self._bus: MessageBus | None = None
         self._main_agent: MainAgent | None = None
         self._trace_agent: TraceAgent | None = None
-        self._human_task: asyncio.Task | None = None
-        self._status_task: asyncio.Task | None = None
+        self._worker_task: asyncio.Task | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield VerticalScroll(id="messages")
-        yield VerticalScroll(id="agents")
         yield InputArea()
         yield Footer()
 
     async def on_mount(self) -> None:
-        agents_panel = self.query_one("#agents", VerticalScroll)
-        await agents_panel.mount(AgentCard(agent_id="main_agent"))
-        await agents_panel.mount(AgentCard(agent_id="trace_agent"))
-
         self._bus = MessageBus(db_path=settings.db_path)
         await self._bus.initialize()
 
@@ -71,16 +64,11 @@ class DuckApp(App):
         await self._trace_agent.start()
 
         human_queue = self._bus.subscribe("human")
-        status_queue = self._bus.subscribe("_tui")
-
-        self._human_task = asyncio.create_task(consume_human_queue(self, human_queue))
-        self._status_task = asyncio.create_task(consume_status_queue(self, status_queue))
+        self._worker_task = asyncio.create_task(consume_human_queue(self, human_queue))
 
     async def on_unmount(self) -> None:
-        if self._human_task:
-            self._human_task.cancel()
-        if self._status_task:
-            self._status_task.cancel()
+        if self._worker_task:
+            self._worker_task.cancel()
         if self._main_agent:
             await self._main_agent.stop()
         if self._trace_agent:

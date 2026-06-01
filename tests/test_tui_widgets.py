@@ -113,26 +113,17 @@ class DuckAppLayoutTest(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield VerticalScroll(id="messages")
-        yield VerticalScroll(id="agents")
         yield InputArea()
         yield Footer()
-
-    async def on_mount(self) -> None:
-        agents_panel = self.query_one("#agents", VerticalScroll)
-        await agents_panel.mount(AgentCard(agent_id="main_agent"))
-        await agents_panel.mount(AgentCard(agent_id="trace_agent"))
 
 
 @pytest.mark.asyncio
 async def test_duck_app_layout():
-    """Test DuckApp UI layout (grid, panels, widgets, agent cards)."""
+    """Test DuckApp UI layout (grid, messages panel, input)."""
     app = DuckAppLayoutTest()
     async with app.run_test(size=(80, 24)) as pilot:
         assert app.query_one("#messages") is not None
-        assert app.query_one("#agents") is not None
         assert app.query_one(InputArea) is not None
-        cards = list(app.query(AgentCard))
-        assert len(cards) == 2
 
 
 @pytest.mark.asyncio

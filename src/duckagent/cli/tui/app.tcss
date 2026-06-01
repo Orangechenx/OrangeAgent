@@ -1,28 +1,19 @@
 Screen {
     layout: grid;
-    grid-size: 2 2;
-    grid-columns: 7fr 3fr;
+    grid-size: 1 2;
     grid-rows: 1fr auto;
 }
 
-Header, Footer, #messages, #agents, VerticalScroll, Static, Markdown, MessageWidget, MessageHeader, AgentCard, InputArea {
+Header, Footer, #messages, VerticalScroll, Static, Markdown, MessageWidget, MessageHeader, InputArea {
     background: transparent;
 }
 
 #messages {
     row-span: 1;
-    column-span: 1;
-    padding: 1;
-}
-
-#agents {
-    row-span: 1;
-    column-span: 1;
     padding: 1;
 }
 
 InputArea {
-    column-span: 2;
     max-height: 6;
 }
 
