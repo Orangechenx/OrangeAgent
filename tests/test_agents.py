@@ -92,3 +92,69 @@ async def test_agent_context_accumulates(bus):
         assert len(agent.context) == 3
 
         await agent.stop()
+
+
+# --- MainAgent tests ---
+
+from duckagent.agents.main_agent import MainAgent
+
+
+@pytest.fixture
+def agent_md(tmp_path):
+    md = tmp_path / "AGENT.md"
+    md.write_text("# Test Project\n\nReverse engineering test app signature.")
+    return md
+
+
+@pytest.mark.asyncio
+async def test_main_agent_loads_agent_md(bus, agent_md):
+    with patch("duckagent.agents.base.litellm.acompletion") as mock_llm:
+        mock_llm.return_value = AsyncMock(
+            choices=[AsyncMock(message=AsyncMock(content="I'll analyze this for you."))]
+        )
+
+        agent = MainAgent(
+            bus=bus,
+            model="test-model",
+            agent_md_path=agent_md,
+            prompts_dir=agent_md.parent,
+            verify_enabled=False,
+        )
+        await agent.start()
+
+        assert "Reverse engineering test app" in agent.system_prompt
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_main_agent_responds_to_human(bus, agent_md):
+    with patch("duckagent.agents.base.litellm.acompletion") as mock_llm:
+        mock_llm.return_value = AsyncMock(
+            choices=[AsyncMock(message=AsyncMock(
+                content='{"action": "respond", "to": "human", "content": "Got it, analyzing now.", "type": "conclusion", "evidence": ["user request"], "confidence": "high"}'
+            ))]
+        )
+
+        agent = MainAgent(
+            bus=bus,
+            model="test-model",
+            agent_md_path=agent_md,
+            prompts_dir=agent_md.parent,
+            verify_enabled=False,
+        )
+        await agent.start()
+
+        human_queue = bus.subscribe("human")
+
+        await bus.publish(Message(
+            from_agent="human",
+            to_agent="main_agent",
+            type="request",
+            content="分析一下这个 trace",
+            evidence=[],
+            confidence="high",
+        ))
+
+        received = await asyncio.wait_for(human_queue.get(), timeout=2.0)
+        assert received.from_agent == "main_agent"
+        await agent.stop()
