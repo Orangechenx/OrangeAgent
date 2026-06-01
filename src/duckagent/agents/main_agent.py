@@ -65,9 +65,11 @@ class MainAgent(BaseAgent):
                 "main_agent_non_json_response",
                 response_preview=response[:100],
             )
+            # Try to extract meaningful content even from broken JSON
+            content = self._extract_content(response)
             await self.send(
                 to=msg.from_agent if msg.from_agent != "human" else "human",
-                content=response,
+                content=content,
                 type="conclusion",
                 evidence=["model response"],
                 confidence="medium",
@@ -85,18 +87,65 @@ class MainAgent(BaseAgent):
         )
 
     @staticmethod
+    def _extract_content(text: str) -> str:
+        """Try to pull the 'content' field out of a broken/malformed JSON response.
+
+        Falls back to stripping JSON-looking prefixes and code fences.
+        """
+        # Try to find "content": "..." anywhere in the text
+        content_match = re.search(
+            r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL
+        )
+        if content_match:
+            # Unescape JSON escapes
+            raw = content_match.group(1)
+            try:
+                return raw.encode().decode("unicode_escape")
+            except Exception:
+                return raw
+
+        # If the whole thing looks like JSON, don't show raw JSON to user
+        stripped = text.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            return "模型返回了无法解析的路由指令，请重试。"
+
+        # Strip code fences and return the rest
+        cleaned = re.sub(r"```(?:json)?\s*", "", stripped)
+        return cleaned.strip() or text[:200]
+
+    @staticmethod
     def _parse_json_response(text: str) -> dict | None:
         """Try to parse JSON from response, handling markdown code blocks."""
         text = text.strip()
+
+        # Attempt 1: raw JSON
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
 
+        # Attempt 2: find JSON in code block
         match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+
+        # Attempt 3: find JSON object by locating "action" key (DS4 wraps JSON in prose)
+        idx = text.find('"action"')
+        if idx > 0:
+            # Find the enclosing braces
+            start = text.rfind("{", 0, idx)
+            end = text.find("}", idx)
+            if start >= 0 and end > start:
+                try:
+                    return json.loads(text[start:end + 1])
+                except json.JSONDecodeError:
+                    pass
+        if match:
+            try:
+                return json.loads(match.group(0))
             except json.JSONDecodeError:
                 pass
 
