@@ -24,6 +24,13 @@ _ROUTING_INSTRUCTION = """
 """
 
 
+_CASUAL_KEYWORDS = {"你好", "hello", "hi", "hey", "在吗", "在?", "谢谢", "thanks", "ok", "好的", "嗯", "哦"}
+
+_ANALYSIS_KEYWORDS = {"trace", "sign", "签名", "加密", "AES", "HMAC", "密钥", "key",
+                       "分析", "analyze", "check", "检查", "帮我", "定位", "查找",
+                       "native", "so", "elf", "arm", "反编译", "逆向"}
+
+
 class MainAgent(BaseAgent):
     """Main coordinating agent that routes messages and loads project context."""
 
@@ -56,6 +63,18 @@ class MainAgent(BaseAgent):
 
     async def on_message(self, msg: Message) -> None:
         """Handle incoming message: think, route by delegation marker."""
+        # Short-circuit casual conversation — no LLM call, no delegation
+        if self._is_casual(msg.content):
+            await self.send(
+                to="human",
+                content=self._casual_reply(),
+                type="conclusion",
+                evidence=["casual shortcut"],
+                confidence="high",
+                reply_to=msg.id,
+            )
+            return
+
         response = await self.think(
             f"[来自 {msg.from_agent}] (type={msg.type}): {msg.content}"
         )
@@ -88,6 +107,22 @@ class MainAgent(BaseAgent):
             confidence="medium",
             reply_to=msg.id,
         )
+
+    @staticmethod
+    def _is_casual(text: str) -> bool:
+        """Check if a message is casual conversation (no analysis intent)."""
+        text_lower = text.strip().lower()
+        # Too short to be a real analysis request
+        if len(text_lower) <= 3:
+            return True
+        # Contains casual keywords and no analysis keywords
+        has_casual = any(kw in text_lower for kw in _CASUAL_KEYWORDS)
+        has_analysis = any(kw in text_lower for kw in _ANALYSIS_KEYWORDS)
+        return has_casual and not has_analysis
+
+    @staticmethod
+    def _casual_reply() -> str:
+        return "你好！有什么逆向分析任务需要我帮忙？"
 
     @staticmethod
     def _strip_json_artifacts(text: str) -> str:
