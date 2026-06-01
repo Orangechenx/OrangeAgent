@@ -3,6 +3,7 @@ import json
 
 from textual.app import App
 from textual.containers import VerticalScroll
+from textual.css.query import NoMatches
 
 from duckagent.bus.models import Message
 from duckagent.cli.tui.widgets.agent_card import AgentCard
@@ -15,10 +16,13 @@ async def consume_human_queue(app: App, queue: asyncio.Queue[Message]) -> None:
         msg = await queue.get()
         if msg.type == "status":
             continue
-        container = app.query_one("#messages", VerticalScroll)
-        widget = MessageWidget(msg)
-        container.mount(widget)
-        container.scroll_end(animate=False)
+        try:
+            container = app.query_one("#messages", VerticalScroll)
+            widget = MessageWidget(msg)
+            container.mount(widget)
+            container.scroll_end(animate=False)
+        except (NoMatches, Exception):
+            break
 
 
 async def consume_status_queue(app: App, queue: asyncio.Queue[Message]) -> None:
@@ -31,11 +35,14 @@ async def consume_status_queue(app: App, queue: asyncio.Queue[Message]) -> None:
             data = json.loads(msg.content)
         except Exception:
             continue
-        for card in app.query(AgentCard):
-            if card.agent_id == msg.from_agent:
-                card.update_status(
-                    state=data.get("state", "idle"),
-                    task_summary=data.get("task_summary", ""),
-                    last_conclusion=data.get("last_conclusion", ""),
-                )
-                break
+        try:
+            for card in app.query(AgentCard):
+                if card.agent_id == msg.from_agent:
+                    card.update_status(
+                        state=data.get("state", "idle"),
+                        task_summary=data.get("task_summary", ""),
+                        last_conclusion=data.get("last_conclusion", ""),
+                    )
+                    break
+        except (NoMatches, Exception):
+            break

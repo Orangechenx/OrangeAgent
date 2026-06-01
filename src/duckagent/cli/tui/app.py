@@ -16,6 +16,11 @@ from duckagent.cli.tui.widgets.input_area import InputArea
 from duckagent.cli.tui.widgets.message import MessageWidget
 from duckagent.cli.tui.worker import consume_human_queue, consume_status_queue
 
+import structlog
+logger = structlog.get_logger()
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
 
 class DuckApp(App):
     CSS_PATH = str(Path(__file__).parent / "app.tcss")
@@ -49,7 +54,7 @@ class DuckApp(App):
         await self._bus.initialize()
 
         prompts_dir = Path(settings.prompts_dir)
-        agent_md_path = Path("AGENT.md")
+        agent_md_path = _PROJECT_ROOT / "AGENT.md"
 
         self._main_agent = MainAgent(
             bus=self._bus,
@@ -101,12 +106,14 @@ class DuckApp(App):
         container = self.query_one("#messages", VerticalScroll)
         container.mount(MessageWidget(msg))
         container.scroll_end(animate=False)
-        asyncio.create_task(self._bus.publish(msg))
 
-    def on_key(self, event) -> None:
-        """Global key handler — Ctrl+D quits even when TextArea is focused."""
-        if event.key == "ctrl+d":
-            self.exit()
+        async def _publish_safe(msg: Message) -> None:
+            try:
+                await self._bus.publish(msg)
+            except Exception as e:
+                logger.error("publish_failed", error=str(e))
+
+        asyncio.create_task(_publish_safe(msg))
 
     def action_clear_messages(self) -> None:
         container = self.query_one("#messages", VerticalScroll)

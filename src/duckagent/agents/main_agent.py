@@ -112,13 +112,16 @@ class MainAgent(BaseAgent):
     def _is_casual(text: str) -> bool:
         """Check if a message is casual conversation (no analysis intent)."""
         text_lower = text.strip().lower()
-        # Too short to be a real analysis request
+        # Contains analysis keywords — always let it through
+        has_analysis = any(kw in text_lower for kw in _ANALYSIS_KEYWORDS)
+        if has_analysis:
+            return False
+        # Very short messages are casual
         if len(text_lower) <= 3:
             return True
-        # Contains casual keywords and no analysis keywords
+        # Contains casual greeting keywords with no analysis intent
         has_casual = any(kw in text_lower for kw in _CASUAL_KEYWORDS)
-        has_analysis = any(kw in text_lower for kw in _ANALYSIS_KEYWORDS)
-        return has_casual and not has_analysis
+        return has_casual
 
     @staticmethod
     def _casual_reply() -> str:
