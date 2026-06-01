@@ -70,6 +70,18 @@ class BaseAgent:
         """Handle an incoming message. Subclasses must override this."""
         raise NotImplementedError
 
+    async def _broadcast_status(self, state: str, task_summary: str = "") -> None:
+        content = json.dumps({"state": state, "task_summary": task_summary}, ensure_ascii=False)
+        msg = Message(
+            from_agent=self.agent_id,
+            to_agent=None,
+            type="status",
+            content=content,
+            evidence=[],
+            confidence="high",
+        )
+        await self.bus.publish(msg)
+
     async def think(self, input_text: str, *, tools: list[dict] | None = None,
                     tool_executor: Any = None, max_iterations: int = 50) -> str:
         """Call the LLM with accumulated context and return the response.
@@ -79,6 +91,7 @@ class BaseAgent:
         model is called again until it produces a final text response.
         """
         self.context.append({"role": "user", "content": input_text})
+        await self._broadcast_status("thinking", task_summary=input_text[:80])
 
         for _ in range(max_iterations):
             kwargs: dict[str, Any] = {"model": self.model, "messages": self.context}
@@ -99,11 +112,14 @@ class BaseAgent:
             self.context.append(assistant_entry)
 
             if not tool_calls:
+                await self._broadcast_status("idle")
                 return message.content or ""
 
             if not tool_executor:
+                await self._broadcast_status("idle")
                 return message.content or ""
 
+            await self._broadcast_status("tool_calling")
             for tc in tool_calls:
                 name = tc.function.name
                 arguments = json.loads(tc.function.arguments)
@@ -115,6 +131,7 @@ class BaseAgent:
                     "content": result,
                 })
 
+        await self._broadcast_status("idle")
         return "Reached max iterations without final answer."
 
     async def _call_llm_with_retry(self, max_retries: int = 3, **kwargs) -> Any:

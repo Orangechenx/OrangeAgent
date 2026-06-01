@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -55,7 +55,12 @@ async def test_agent_receives_message(bus):
             confidence="high",
         ))
 
-        received = await asyncio.wait_for(human_queue.get(), timeout=2.0)
+        # Drain any status broadcasts before checking real response
+        while True:
+            received = await asyncio.wait_for(human_queue.get(), timeout=2.0)
+            if received.type != "status":
+                break
+
         assert received.content == "echoed back"
         assert received.from_agent == "echo_agent"
 
@@ -196,8 +201,49 @@ async def test_trace_agent_analyzes_request(bus, tmp_path):
             confidence="high",
         ))
 
-        received = await asyncio.wait_for(main_queue.get(), timeout=2.0)
+        # Drain any status broadcasts before checking real response
+        while True:
+            received = await asyncio.wait_for(main_queue.get(), timeout=2.0)
+            if received.type != "status":
+                break
+
         assert received.from_agent == "trace_agent"
         assert received.type == "conclusion"
         assert "AES" in received.content
         await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_agent_broadcasts_thinking_status(tmp_path):
+    bus = MessageBus(db_path=tmp_path / "test.db")
+    await bus.initialize()
+
+    status_queue = bus.subscribe("_tui")
+
+    agent = BaseAgent(
+        agent_id="test_agent",
+        system_prompt="test",
+        bus=bus,
+        model="fake/model",
+        verify_enabled=False,
+    )
+
+    with patch("litellm.acompletion") as mock_llm:
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "hello"
+        mock_response.choices[0].message.tool_calls = None
+        mock_llm.return_value = mock_response
+
+        await agent.think("test input")
+
+    messages = []
+    while not status_queue.empty():
+        messages.append(await status_queue.get())
+
+    status_msgs = [m for m in messages if m.type == "status"]
+    assert len(status_msgs) >= 2
+    assert '"state": "thinking"' in status_msgs[0].content
+    assert '"state": "idle"' in status_msgs[-1].content
+
+    await bus.close()
