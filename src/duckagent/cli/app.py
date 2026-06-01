@@ -15,6 +15,9 @@ from duckagent.config import settings
 logger = structlog.get_logger()
 app = typer.Typer(name="duck", help="DuckAgent - Android 逆向 Multi-Agent 系统")
 
+_SEPARATOR = "─" * 50
+_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
 
 @asynccontextmanager
 async def get_bus():
@@ -114,30 +117,52 @@ async def _run_interactive():
 
     human_queue = bus.subscribe("human")
 
-    typer.echo("系统就绪。直接输入发送消息给主 Agent，Ctrl+C 退出。\n")
+    typer.echo("系统就绪。直接输入发送消息给主 Agent，Ctrl+C 退出。")
+    typer.echo(_SEPARATOR)
 
-    display_task = asyncio.create_task(_display_messages(human_queue))
+    thinking_event = asyncio.Event()
+    display_task = asyncio.create_task(_display_messages(human_queue, thinking_event))
+    spinner_task = asyncio.create_task(_spinner(thinking_event))
 
     try:
-        await _input_loop(bus)
+        await _input_loop(bus, thinking_event)
     except (KeyboardInterrupt, EOFError):
-        typer.echo("\n正在停止...")
+        sys.stdout.write("\r\033[K")
+        typer.echo("正在停止...")
     finally:
         display_task.cancel()
+        spinner_task.cancel()
         await main_agent.stop()
         await trace_agent.stop()
         await bus.close()
         typer.echo("已停止。")
 
 
-async def _display_messages(queue: asyncio.Queue):
+async def _display_messages(queue: asyncio.Queue, thinking_event: asyncio.Event):
     while True:
         msg = await queue.get()
-        typer.echo(f"\n{format_message(msg)}")
+        # Stop spinner before printing
+        thinking_event.clear()
+        # Clear the spinner line
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+        typer.echo(format_message(msg))
+        typer.echo(_SEPARATOR)
         typer.echo("> ", nl=False)
 
 
-async def _input_loop(bus: MessageBus):
+async def _spinner(thinking_event: asyncio.Event):
+    """Show a thinking animation while waiting for agent response."""
+    frame = 0
+    while True:
+        if thinking_event.is_set():
+            sys.stdout.write(f"\r\033[K{_SPINNER_FRAMES[frame % len(_SPINNER_FRAMES)]} thinking...")
+            sys.stdout.flush()
+            frame += 1
+        await asyncio.sleep(0.1)
+
+
+async def _input_loop(bus: MessageBus, thinking_event: asyncio.Event):
     loop = asyncio.get_event_loop()
     while True:
         try:
@@ -148,6 +173,9 @@ async def _input_loop(bus: MessageBus):
         line = line.strip()
         if not line:
             continue
+
+        typer.echo(_SEPARATOR)
+        thinking_event.set()
 
         msg = Message(
             from_agent="human",
