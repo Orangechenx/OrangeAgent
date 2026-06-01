@@ -99,7 +99,14 @@ async def test_full_flow_human_to_trace_and_back(system):
             confidence="high",
         ))
 
-        received = await asyncio.wait_for(human_queue.get(), timeout=5.0)
+        # Skip status messages until we get the actual reply
+        received = None
+        for _ in range(10):
+            msg = await asyncio.wait_for(human_queue.get(), timeout=5.0)
+            if msg.type != "status":
+                received = msg
+                break
+        assert received is not None, "Timed out waiting for non-status message"
         assert received.to_agent == "human"
         assert received.from_agent == "main_agent"
         assert "AES" in received.content

@@ -61,6 +61,8 @@ class BaseAgent:
         assert self._queue is not None
         while True:
             msg = await self._queue.get()
+            if msg.type == "status":
+                continue
             try:
                 await self.on_message(msg)
             except Exception as e:
