@@ -57,14 +57,14 @@ class MainAgent(BaseAgent):
             system_prompt=system_prompt,
             bus=bus,
             model=model,
-            verify_enabled=verify_enabled,
+            verify_enabled=False,  # main agent doesn't need self-check
             verify_max_retries=verify_max_retries,
         )
 
     async def on_message(self, msg: Message) -> None:
         """Handle incoming message: think, route by delegation marker."""
-        # Short-circuit casual conversation — no LLM call, no delegation
-        if self._is_casual(msg.content):
+        # Short-circuit casual conversation from human — no LLM call, no delegation
+        if msg.from_agent == "human" and self._is_casual(msg.content):
             await self.send(
                 to="human",
                 content=self._casual_reply(),
