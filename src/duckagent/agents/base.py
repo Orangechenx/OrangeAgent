@@ -86,7 +86,7 @@ class BaseAgent:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
 
-            response = await litellm.acompletion(**kwargs)
+            response = await self._call_llm_with_retry(**kwargs)
             message = response.choices[0].message
 
             assistant_entry: dict[str, Any] = {"role": "assistant", "content": message.content or ""}
@@ -116,6 +116,21 @@ class BaseAgent:
                 })
 
         return "Reached max iterations without final answer."
+
+    async def _call_llm_with_retry(self, max_retries: int = 3, **kwargs) -> Any:
+        """Call litellm with retry on transient errors."""
+        for attempt in range(max_retries):
+            try:
+                return await litellm.acompletion(**kwargs)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                error_name = type(e).__name__
+                if "BadGateway" in error_name or "Timeout" in error_name or "Connection" in error_name:
+                    logger.warning("llm_retry", agent_id=self.agent_id, attempt=attempt + 1, error=str(e)[:100])
+                    await asyncio.sleep(2 ** attempt)
+                else:
+                    raise
 
     async def send(
         self,
