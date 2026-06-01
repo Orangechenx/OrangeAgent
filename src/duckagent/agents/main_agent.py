@@ -63,17 +63,6 @@ class MainAgent(BaseAgent):
 
     async def on_message(self, msg: Message) -> None:
         """Handle incoming message: think, route by delegation marker."""
-        # Short-circuit casual conversation from human — no LLM call, no delegation
-        if msg.from_agent == "human" and self._is_casual(msg.content):
-            await self.send(
-                to="human",
-                content=self._casual_reply(),
-                type="conclusion",
-                evidence=["casual shortcut"],
-                confidence="high",
-                reply_to=msg.id,
-            )
-            return
 
         response = await self.think(
             f"[来自 {msg.from_agent}] (type={msg.type}): {msg.content}"
