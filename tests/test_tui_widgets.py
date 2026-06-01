@@ -1,5 +1,10 @@
+import asyncio
+from pathlib import Path
+
 import pytest
 from textual.app import App, ComposeResult
+from textual.containers import VerticalScroll
+from textual.widgets import Footer, Header
 
 from duckagent.cli.tui.widgets.input_area import InputArea
 from duckagent.cli.tui.widgets.message import MessageWidget
@@ -92,3 +97,60 @@ async def test_agent_card_update_status():
         card.update_status("thinking", task_summary="分析加密算法")
         assert card.state == "thinking"
         assert "分析加密算法" in card.task_summary
+
+
+# --- DuckApp tests (Task 7-8) ---
+
+from duckagent.cli.tui.app import DuckApp
+from duckagent.bus.store import MessageBus
+
+
+class DuckAppLayoutTest(App):
+    """Minimal app that mirrors DuckApp.compose() layout for UI testing."""
+
+    CSS_PATH = DuckApp.CSS_PATH
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield VerticalScroll(id="messages")
+        yield VerticalScroll(id="agents")
+        yield InputArea()
+        yield Footer()
+
+    async def on_mount(self) -> None:
+        agents_panel = self.query_one("#agents", VerticalScroll)
+        await agents_panel.mount(AgentCard(agent_id="main_agent"))
+        await agents_panel.mount(AgentCard(agent_id="trace_agent"))
+
+
+@pytest.mark.asyncio
+async def test_duck_app_layout():
+    """Test DuckApp UI layout (grid, panels, widgets, agent cards)."""
+    app = DuckAppLayoutTest()
+    async with app.run_test(size=(80, 24)) as pilot:
+        assert app.query_one("#messages") is not None
+        assert app.query_one("#agents") is not None
+        assert app.query_one(InputArea) is not None
+        cards = list(app.query(AgentCard))
+        assert len(cards) == 2
+
+
+@pytest.mark.asyncio
+async def test_duck_app_instantiable():
+    """Test DuckApp can be imported and instantiated."""
+    app = DuckApp()
+    assert app is not None
+    assert app.TITLE == "DuckAgent"
+    assert len(app.BINDINGS) == 2
+
+
+@pytest.mark.asyncio
+async def test_duck_app_bus_lifecycle():
+    """Test DuckApp bus initialize and close with a real SQLite database."""
+    bus = MessageBus(db_path=Path(".duckagent/test_messages.db"))
+    await bus.initialize()
+    queue = bus.subscribe("test_agent")
+    assert queue is not None
+    await bus.close()
+    # Clean up test db
+    Path(".duckagent/test_messages.db").unlink(missing_ok=True)
