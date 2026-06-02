@@ -9,7 +9,8 @@ from textual.widgets import Footer, Header
 from duckagent.agents.main_agent import MainAgent
 from duckagent.agents.trace_agent import TraceAgent
 from duckagent.agents.ida_jadx_agent import IdaJadxAgent
-from duckagent.bus.store import MessageBus
+from duckagent.bus.interface import MessageBus
+from duckagent.bus.store import LocalMessageBus
 from duckagent.bus.models import Message
 from duckagent.config import settings
 from duckagent.cli.tui.widgets.agent_card import AgentCard
@@ -31,14 +32,16 @@ class DuckApp(App):
         Binding("ctrl+d", "quit", "退出", priority=True),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, bus: MessageBus | None = None, http_mode: bool = False) -> None:
         super().__init__()
+        self._external_bus = bus
+        self._http_mode = http_mode
         self._bus: MessageBus | None = None
         self._main_agent: MainAgent | None = None
         self._trace_agent: TraceAgent | None = None
         self._ida_jadx_agent: IdaJadxAgent | None = None
-        self._status_task: asyncio.Task | None = None
-        self._observer_task: asyncio.Task | None = None
+        self._status_task: asyncio.Task[None] | None = None
+        self._observer_task: asyncio.Task[None] | None = None
         self._observer_queue: asyncio.Queue[Message] | None = None
 
     def compose(self) -> ComposeResult:
@@ -54,41 +57,47 @@ class DuckApp(App):
         await agents_panel.mount(AgentCard(agent_id="trace_agent"))
         await agents_panel.mount(AgentCard(agent_id="ida_jadx_agent"))
 
-        self._bus = MessageBus(db_path=settings.db_path)
-        await self._bus.initialize()
+        if self._http_mode and self._external_bus:
+            # HTTP mode: use the provided bus (agents run in separate processes)
+            self._bus = self._external_bus
+            await self._bus.initialize()
+        else:
+            # Local mode: create bus, agents, and start everything in-process
+            self._bus = LocalMessageBus(db_path=settings.db_path)
+            await self._bus.initialize()
 
-        prompts_dir = Path(settings.prompts_dir)
-        agent_md_path = _PROJECT_ROOT / "AGENT.md"
+            prompts_dir = Path(settings.prompts_dir)
+            agent_md_path = _PROJECT_ROOT / "AGENT.md"
 
-        self._main_agent = MainAgent(
-            bus=self._bus,
-            model=settings.litellm_model,
-            agent_md_path=agent_md_path,
-            prompts_dir=prompts_dir,
-            verify_enabled=settings.verify_enabled,
-            verify_max_retries=settings.verify_max_retries,
-        )
-        self._trace_agent = TraceAgent(
-            bus=self._bus,
-            model=settings.litellm_model,
-            prompts_dir=prompts_dir,
-            trace_files=settings.trace_files or None,
-            verify_enabled=settings.verify_enabled,
-            verify_max_retries=settings.verify_max_retries,
-        )
-        self._ida_jadx_agent = IdaJadxAgent(
-            bus=self._bus,
-            model=settings.litellm_model,
-            prompts_dir=prompts_dir,
-            jadx_host=settings.jadx_host,
-            jadx_port=settings.jadx_port,
-            verify_enabled=settings.verify_enabled,
-            verify_max_retries=settings.verify_max_retries,
-        )
+            self._main_agent = MainAgent(
+                bus=self._bus,
+                model=settings.litellm_model,
+                agent_md_path=agent_md_path,
+                prompts_dir=prompts_dir,
+                verify_enabled=settings.verify_enabled,
+                verify_max_retries=settings.verify_max_retries,
+            )
+            self._trace_agent = TraceAgent(
+                bus=self._bus,
+                model=settings.litellm_model,
+                prompts_dir=prompts_dir,
+                trace_files=settings.trace_files or None,
+                verify_enabled=settings.verify_enabled,
+                verify_max_retries=settings.verify_max_retries,
+            )
+            self._ida_jadx_agent = IdaJadxAgent(
+                bus=self._bus,
+                model=settings.litellm_model,
+                prompts_dir=prompts_dir,
+                jadx_host=settings.jadx_host,
+                jadx_port=settings.jadx_port,
+                verify_enabled=settings.verify_enabled,
+                verify_max_retries=settings.verify_max_retries,
+            )
 
-        await self._main_agent.start()
-        await self._trace_agent.start()
-        await self._ida_jadx_agent.start()
+            await self._main_agent.start()
+            await self._trace_agent.start()
+            await self._ida_jadx_agent.start()
 
         # Observer sees ALL messages (agent↔agent + agent→human)
         self._observer_queue = self._bus.add_observer()
@@ -150,6 +159,7 @@ class DuckApp(App):
 
         async def _publish_safe(msg: Message) -> None:
             try:
+                assert self._bus is not None
                 await self._bus.publish(msg)
             except Exception as e:
                 logger.error("publish_failed", error=str(e))

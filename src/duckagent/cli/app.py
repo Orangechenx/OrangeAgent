@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import typer
 import structlog
 
-from duckagent.bus import Message, MessageBus
+from duckagent.bus import Message, LocalMessageBus
 from duckagent.config import settings
 
 logger = structlog.get_logger()
@@ -14,7 +14,7 @@ app = typer.Typer(name="duck", help="DuckAgent - Android 逆向 Multi-Agent 系�
 
 @asynccontextmanager
 async def get_bus():
-    bus = MessageBus(db_path=settings.db_path)
+    bus = LocalMessageBus(db_path=settings.db_path)
     await bus.initialize()
     try:
         yield bus
@@ -30,12 +30,26 @@ def format_message(msg: Message) -> str:
     return f"[{ts}] {msg.from_agent} → {target}: {msg.content}"
 
 
+# ── Core commands ──────────────────────────────────────────────
+
+
 @app.command()
-def run():
+def run(
+    transport: str = typer.Option("local", "--transport", help="Bus transport: local | http"),
+    server_url: str = typer.Option(None, "--server-url", help="Bus server URL (http mode)"),
+):
     """启动 TUI 交互模式"""
-    from duckagent.cli.tui.app import DuckApp
-    duck_app = DuckApp()
-    duck_app.run()
+    if transport == "http":
+        url = server_url or settings.bus_server_url
+        from duckagent.bus.http_client import HttpMessageBus
+        from duckagent.cli.tui.app import DuckApp
+        bus = HttpMessageBus(server_url=url, agent_id=None)
+        duck_app = DuckApp(bus=bus, http_mode=True)
+        duck_app.run()
+    else:
+        from duckagent.cli.tui.app import DuckApp
+        duck_app = DuckApp()
+        duck_app.run()
 
 
 @app.command()
@@ -52,6 +66,42 @@ def log(
 def send(message: str):
     """发送消息给主 Agent（非交互模式）"""
     asyncio.run(_send_message(message))
+
+
+# ── HTTP / multi-process commands ──────────────────────────────
+
+
+@app.command()
+def server(
+    port: int = typer.Option(8720, "--port", help="Bus server port"),
+):
+    """启动 HTTP 消息总线服务"""
+    import uvicorn
+    from duckagent.server.app import app as bus_app
+    uvicorn.run(bus_app, host="127.0.0.1", port=port, log_level="info")
+
+
+@app.command()
+def launch(
+    port: int = typer.Option(8720, "--port", help="Bus server port"),
+):
+    """启动全部进程（server + agents + TUI）"""
+    from duckagent.launcher import Launcher
+    launcher = Launcher(server_port=port)
+    launcher.start()
+
+
+@app.command()
+def agent(
+    agent_type: str = typer.Argument(..., help="Agent type: main_agent | trace_agent | ida_jadx_agent"),
+    server_url: str = typer.Option(..., "--server-url", help="Bus server URL"),
+):
+    """启动单个 Agent 进程"""
+    from duckagent.processes.agent_process import run_agent
+    asyncio.run(run_agent(agent_type, server_url))
+
+
+# ── Internals ──────────────────────────────────────────────────
 
 
 async def _show_log(from_agent: str | None, limit: int, msg_type: str | None):
