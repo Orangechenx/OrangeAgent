@@ -4,17 +4,17 @@ from pathlib import Path
 import structlog
 
 from duckagent.bus import Message
-from duckagent.tools import LocalTraceToolExecutor, TRACE_TOOLS
+from duckagent.tools import JadxToolExecutor, JADX_TOOLS
 from .base import BaseAgent
 
 logger = structlog.get_logger()
 
 
-class TraceAgent(BaseAgent):
-    """Agent specialized in analyzing ARM64 execution traces.
+class IdaJadxAgent(BaseAgent):
+    """Agent specialized in static analysis of decompiled APK code via JADX.
 
-    When trace files are provided, uses tool calling (trace_search, trace_context,
-    trace_cross_ref) to navigate large trace files autonomously.
+    Uses JADX tools to search classes, read source code, find cross-references,
+    and analyze Android manifest/resources.
     """
 
     def __init__(
@@ -22,15 +22,20 @@ class TraceAgent(BaseAgent):
         bus,
         model: str,
         prompts_dir: Path,
-        trace_files: dict[str, Path] | None = None,
+        jadx_host: str = "127.0.0.1",
+        jadx_port: int = 8650,
         verify_enabled: bool = True,
         verify_max_retries: int = 3,
     ) -> None:
-        prompt_file = prompts_dir / "trace_agent.md"
-        base_prompt = prompt_file.read_text() if prompt_file.exists() else "你是 Trace 分析 Agent。"
+        prompt_file = prompts_dir / "ida_jadx_agent.md"
+        base_prompt = (
+            prompt_file.read_text()
+            if prompt_file.exists()
+            else "你是 JADX 静态分析 Agent。"
+        )
 
         super().__init__(
-            agent_id="trace_agent",
+            agent_id="ida_jadx_agent",
             system_prompt=base_prompt,
             bus=bus,
             model=model,
@@ -38,13 +43,11 @@ class TraceAgent(BaseAgent):
             verify_max_retries=verify_max_retries,
         )
 
-        self._executor: LocalTraceToolExecutor | None = None
-        self._tools: list[dict] | None = None
-        if trace_files:
-            existing = {k: v for k, v in trace_files.items() if v.exists()}
-            if existing:
-                self._executor = LocalTraceToolExecutor(existing)
-                self._tools = TRACE_TOOLS
+        self._executor = JadxToolExecutor(
+            jadx_host=jadx_host,
+            jadx_port=jadx_port,
+        )
+        self._tools = JADX_TOOLS
 
     async def stop(self) -> None:
         if self._executor:
@@ -88,17 +91,22 @@ class TraceAgent(BaseAgent):
             to=reply_to,
             content=response,
             type="conclusion",
-            evidence=evidence if evidence else ["analysis based on provided trace"],
+            evidence=evidence if evidence else ["analysis based on APK static analysis"],
             confidence=self._assess_confidence(response),
             reply_to=msg.id,
         )
 
     @staticmethod
     def _extract_evidence(text: str) -> list[str]:
-        """Extract line number references from the analysis text."""
-        pattern = r"line \d+[^.;\n]*"
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        return matches
+        """Extract class name and method references as evidence."""
+        patterns = [
+            r'(?:class|类)\s+([\w.$]+)',
+            r'(?:method|方法)\s+([\w.$<>()]+)',
+        ]
+        evidence: list[str] = []
+        for pattern in patterns:
+            evidence.extend(re.findall(pattern, text, re.IGNORECASE))
+        return evidence[:10]  # limit
 
     @staticmethod
     def _assess_confidence(text: str) -> str:

@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     trace_code_file: str | None = None
     trace_rw_file: str | None = None
     trace_bl_file: str | None = None
+    jadx_host: str = "127.0.0.1"
+    jadx_port: int = 8650
 
     model_config = {"env_prefix": "DUCKAGENT_"}
 

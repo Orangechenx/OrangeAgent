@@ -86,3 +86,26 @@ MessageWidget {
     padding: 0 1;
     margin: 0 0 1 0;
 }
+
+/* Human messages: blue left border */
+.msg-human {
+    border-left: thick #58a6ff;
+}
+
+/* Messages directed to human: green left border — these are the most important */
+.msg-to-human {
+    border-left: thick #3fb950;
+}
+
+/* Agent-to-agent messages: dimmer, visible but clearly internal comms */
+.msg-agent {
+    border-left: thick #484f58;
+}
+
+.msg-agent .MessageHeader {
+    color: #6e7681;
+}
+
+.msg-agent Markdown {
+    color: #8b949e;
+}

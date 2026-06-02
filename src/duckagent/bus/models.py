@@ -9,6 +9,7 @@ class Message(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     from_agent: str
     to_agent: str | None = None
+    mentions: list[str] = Field(default_factory=list)
     type: Literal["conclusion", "request", "question", "decision", "status"]
     content: str
     evidence: list[str] = Field(default_factory=list)

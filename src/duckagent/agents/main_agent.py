@@ -8,27 +8,28 @@ from .base import BaseAgent
 
 logger = structlog.get_logger()
 
+_INTERNAL_AGENTS = {"trace_agent", "ida_jadx_agent"}
+
 _ROUTING_INSTRUCTION = """
 
-## 回复格式
+## 多 Agent 协作
 
-请用自然语言回复，使用 markdown 格式组织内容。
+**仅在用户明确要求时**才委托给其他 agent。使用 @agent_id 指名：
 
-**委托规则：** 只有当用户明确要求分析 trace/sign/签名/加密/Native 时才委托。
-对话性的消息（打招呼、闲聊、询问状态）直接回复，不要委托。
+- `@trace_agent` — 执行流分析，分析 ARM64 trace 数据
+- `@ida_jadx_agent` — 静态代码分析，搜索/阅读 APK 反编译代码
 
-委托时在第一行加上：
->>> DELEGATE TO trace_agent
+委托格式：
+```
+@trace_agent 请分析这段 trace 中地址 0x7a3c00 处的加密操作
+```
 
-下面写要委托的具体分析任务。
+**重要规则：**
+- 用户只说"测试通信"就别分配实际分析任务，只做通信测试
+- 用户说"让 xx agent 回复我一句话"，你就只让它回复一句，别加戏
+- 回复用户时**不要 @ 其他 agent**——回复是给用户看的，不是新的委托
+- 用户没让做的事不要主动提议
 """
-
-
-_CASUAL_KEYWORDS = {"你好", "hello", "hi", "hey", "在吗", "在?", "谢谢", "thanks", "ok", "好的", "嗯", "哦"}
-
-_ANALYSIS_KEYWORDS = {"trace", "sign", "签名", "加密", "AES", "HMAC", "密钥", "key",
-                       "分析", "analyze", "check", "检查", "帮我", "定位", "查找",
-                       "native", "so", "elf", "arm", "反编译", "逆向"}
 
 
 class MainAgent(BaseAgent):
@@ -62,31 +63,34 @@ class MainAgent(BaseAgent):
         )
 
     async def on_message(self, msg: Message) -> None:
-        """Handle incoming message: think, route by delegation marker."""
+        """Handle incoming message: think using LLM, route by @mentions in response."""
 
-        response = await self.think(
-            f"[来自 {msg.from_agent}] (type={msg.type}): {msg.content}"
-        )
+        # Build context-aware input
+        context_info = f"[来自 {msg.from_agent}] (type={msg.type})"
+        if msg.mentions:
+            context_info += f" [提及了: {', '.join(msg.mentions)}]"
+        input_text = f"{context_info}: {msg.content}"
 
-        # Check for delegation marker
-        delegate_match = re.match(r">>>\s*DELEGATE\s+TO\s+(\w+)", response)
-        if delegate_match:
-            target = delegate_match.group(1)
-            # Remove the marker line from the delegated content
-            task_content = response[delegate_match.end():].strip()
-            if not task_content:
-                task_content = msg.content
+        response = await self.think(input_text)
+
+        # Parse @mentions from LLM's response and route to internal agents
+        response_mentions = self._parse_mentions(response)
+        internal_mentions = [m for m in response_mentions if m in _INTERNAL_AGENTS]
+
+        if internal_mentions:
+            unique_mentions = list(dict.fromkeys(internal_mentions))
             await self.send(
-                to=target,
-                content=task_content,
+                to=None,  # routed purely by mentions
+                content=response,
                 type="request",
+                mentions=unique_mentions,
                 evidence=[msg.id] if msg.id else [],
                 confidence="high",
                 reply_to=msg.id,
             )
             return
 
-        # No delegation — always respond to human
+        # No internal mentions — respond to human
         content = self._strip_json_artifacts(response)
         await self.send(
             to="human",
@@ -96,25 +100,6 @@ class MainAgent(BaseAgent):
             confidence="medium",
             reply_to=msg.id,
         )
-
-    @staticmethod
-    def _is_casual(text: str) -> bool:
-        """Check if a message is casual conversation (no analysis intent)."""
-        text_lower = text.strip().lower()
-        # Contains analysis keywords — always let it through
-        has_analysis = any(kw in text_lower for kw in _ANALYSIS_KEYWORDS)
-        if has_analysis:
-            return False
-        # Very short messages are casual
-        if len(text_lower) <= 3:
-            return True
-        # Contains casual greeting keywords with no analysis intent
-        has_casual = any(kw in text_lower for kw in _CASUAL_KEYWORDS)
-        return has_casual
-
-    @staticmethod
-    def _casual_reply() -> str:
-        return "你好！有什么逆向分析任务需要我帮忙？"
 
     @staticmethod
     def _strip_json_artifacts(text: str) -> str:

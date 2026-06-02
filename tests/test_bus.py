@@ -201,6 +201,48 @@ async def test_status_message_not_persisted(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_observer_receives_all_messages(bus):
+    """Observer receives copies of all messages regardless of routing."""
+    obs = bus.add_observer()
+    target_queue = bus.subscribe("trace_agent")
+
+    # Private message
+    private_msg = Message(
+        from_agent="main_agent",
+        to_agent="trace_agent",
+        type="request",
+        content="private",
+        evidence=[],
+        confidence="high",
+    )
+    await bus.publish(private_msg)
+
+    # Target gets it
+    private_received = await asyncio.wait_for(target_queue.get(), timeout=1.0)
+    assert private_received.content == "private"
+
+    # Observer also gets a copy
+    obs_received = await asyncio.wait_for(obs.get(), timeout=1.0)
+    assert obs_received.content == "private"
+
+    # Broadcast message
+    broadcast_msg = Message(
+        from_agent="trace_agent",
+        to_agent=None,
+        type="conclusion",
+        content="broadcast",
+        evidence=["line 1"],
+        confidence="high",
+    )
+    await bus.publish(broadcast_msg)
+
+    obs_received2 = await asyncio.wait_for(obs.get(), timeout=1.0)
+    assert obs_received2.content == "broadcast"
+
+    bus.remove_observer(obs)
+
+
+@pytest.mark.asyncio
 async def test_persistence_across_instances(tmp_path):
     db_path = tmp_path / "persist.db"
 
@@ -218,4 +260,139 @@ async def test_persistence_across_instances(tmp_path):
     history = await bus2.get_history()
     assert len(history) == 1
     assert history[0].content == "persisted"
+    await bus2.close()
+
+
+# --- Mention-related tests ---
+
+
+def test_message_mentions_default_empty():
+    """Message.mentions should default to empty list."""
+    msg = Message(
+        from_agent="trace_agent",
+        to_agent=None,
+        type="conclusion",
+        content="test",
+        evidence=[],
+        confidence="high",
+    )
+    assert msg.mentions == []
+
+
+def test_message_with_mentions():
+    """Message should accept and store mentions."""
+    msg = Message(
+        from_agent="main_agent",
+        to_agent=None,
+        mentions=["trace_agent", "ida_jadx_agent"],
+        type="request",
+        content="@trace_agent @ida_jadx_agent 分析这个",
+        evidence=[],
+        confidence="high",
+    )
+    assert msg.mentions == ["trace_agent", "ida_jadx_agent"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_by_mentions(bus):
+    """Publishing with mentions routes to mentioned agents."""
+    target_queue = bus.subscribe("trace_agent")
+    other_queue = bus.subscribe("other_agent")
+
+    msg = Message(
+        from_agent="main_agent",
+        to_agent=None,
+        mentions=["trace_agent"],
+        type="request",
+        content="@trace_agent 分析",
+        evidence=[],
+        confidence="high",
+    )
+    await bus.publish(msg)
+
+    # trace_agent receives it
+    received = await asyncio.wait_for(target_queue.get(), timeout=1.0)
+    assert received.content == "@trace_agent 分析"
+
+    # other_agent does NOT receive it
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(other_queue.get(), timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_mentions_excludes_sender(bus):
+    """Sender should never receive their own message even if they mention themselves."""
+    queue = bus.subscribe("trace_agent")
+
+    msg = Message(
+        from_agent="trace_agent",
+        to_agent=None,
+        mentions=["trace_agent"],
+        type="conclusion",
+        content="self mention",
+        evidence=[],
+        confidence="high",
+    )
+    await bus.publish(msg)
+
+    # trace_agent should NOT receive it (sender exclusion)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(queue.get(), timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_mentions_and_to_agent_combined(bus):
+    """When both to_agent and mentions are set, both recipients get it."""
+    trace_queue = bus.subscribe("trace_agent")
+    jadx_queue = bus.subscribe("ida_jadx_agent")
+    other_queue = bus.subscribe("other_agent")
+
+    msg = Message(
+        from_agent="main_agent",
+        to_agent="trace_agent",
+        mentions=["ida_jadx_agent"],
+        type="request",
+        content="collaborate",
+        evidence=[],
+        confidence="high",
+    )
+    await bus.publish(msg)
+
+    # trace_agent receives via to_agent
+    received_trace = await asyncio.wait_for(trace_queue.get(), timeout=1.0)
+    assert received_trace.content == "collaborate"
+
+    # ida_jadx_agent receives via mentions
+    received_jadx = await asyncio.wait_for(jadx_queue.get(), timeout=1.0)
+    assert received_jadx.content == "collaborate"
+
+    # other_agent does NOT receive
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(other_queue.get(), timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_mentions_persisted_and_restored(tmp_path):
+    """Mentions should survive persistence across MessageBus instances."""
+    db_path = tmp_path / "mentions_persist.db"
+
+    bus1 = MessageBus(db_path=db_path)
+    await bus1.initialize()
+    await bus1.publish(Message(
+        from_agent="main_agent",
+        to_agent=None,
+        mentions=["trace_agent", "ida_jadx_agent"],
+        type="request",
+        content="tagged message",
+        evidence=[],
+        confidence="high",
+    ))
+    await bus1.close()
+
+    bus2 = MessageBus(db_path=db_path)
+    await bus2.initialize()
+    history = await bus2.get_history()
+    assert len(history) == 1
+    assert history[0].content == "tagged message"
+    assert history[0].mentions == ["trace_agent", "ida_jadx_agent"]
     await bus2.close()

@@ -8,13 +8,14 @@ from textual.widgets import Footer, Header
 
 from duckagent.agents.main_agent import MainAgent
 from duckagent.agents.trace_agent import TraceAgent
+from duckagent.agents.ida_jadx_agent import IdaJadxAgent
 from duckagent.bus.store import MessageBus
 from duckagent.bus.models import Message
 from duckagent.config import settings
 from duckagent.cli.tui.widgets.agent_card import AgentCard
 from duckagent.cli.tui.widgets.input_area import InputArea
 from duckagent.cli.tui.widgets.message import MessageWidget
-from duckagent.cli.tui.worker import consume_human_queue, consume_status_queue
+from duckagent.cli.tui.worker import consume_status_queue, consume_observer_queue
 
 import structlog
 logger = structlog.get_logger()
@@ -35,8 +36,10 @@ class DuckApp(App):
         self._bus: MessageBus | None = None
         self._main_agent: MainAgent | None = None
         self._trace_agent: TraceAgent | None = None
-        self._human_task: asyncio.Task | None = None
+        self._ida_jadx_agent: IdaJadxAgent | None = None
         self._status_task: asyncio.Task | None = None
+        self._observer_task: asyncio.Task | None = None
+        self._observer_queue: asyncio.Queue[Message] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -49,6 +52,7 @@ class DuckApp(App):
         agents_panel = self.query_one("#agents", VerticalScroll)
         await agents_panel.mount(AgentCard(agent_id="main_agent"))
         await agents_panel.mount(AgentCard(agent_id="trace_agent"))
+        await agents_panel.mount(AgentCard(agent_id="ida_jadx_agent"))
 
         self._bus = MessageBus(db_path=settings.db_path)
         await self._bus.initialize()
@@ -72,32 +76,69 @@ class DuckApp(App):
             verify_enabled=settings.verify_enabled,
             verify_max_retries=settings.verify_max_retries,
         )
+        self._ida_jadx_agent = IdaJadxAgent(
+            bus=self._bus,
+            model=settings.litellm_model,
+            prompts_dir=prompts_dir,
+            jadx_host=settings.jadx_host,
+            jadx_port=settings.jadx_port,
+            verify_enabled=settings.verify_enabled,
+            verify_max_retries=settings.verify_max_retries,
+        )
 
         await self._main_agent.start()
         await self._trace_agent.start()
+        await self._ida_jadx_agent.start()
 
-        human_queue = self._bus.subscribe("human")
+        # Observer sees ALL messages (agent↔agent + agent→human)
+        self._observer_queue = self._bus.add_observer()
         status_queue = self._bus.subscribe("_tui")
 
-        self._human_task = asyncio.create_task(consume_human_queue(self, human_queue))
+        self._observer_task = asyncio.create_task(consume_observer_queue(self, self._observer_queue))
         self._status_task = asyncio.create_task(consume_status_queue(self, status_queue))
 
+        # Load recent message history in background so UI appears immediately
+        asyncio.create_task(self._load_history())
+
+    async def _load_history(self) -> None:
+        """Load recent messages from DB after UI is visible."""
+        assert self._bus is not None
+        try:
+            history = await self._bus.get_history(limit=20)
+        except Exception:
+            return
+        container = self.query_one("#messages", VerticalScroll)
+        for msg in history:
+            if msg.type == "status":
+                continue
+            container.mount(MessageWidget(msg))
+        if history:
+            container.scroll_end(animate=False)
+
     async def on_unmount(self) -> None:
-        if self._human_task:
-            self._human_task.cancel()
         if self._status_task:
             self._status_task.cancel()
+        if self._observer_task:
+            self._observer_task.cancel()
+        if self._observer_queue and self._bus:
+            self._bus.remove_observer(self._observer_queue)
         if self._main_agent:
             await self._main_agent.stop()
         if self._trace_agent:
             await self._trace_agent.stop()
+        if self._ida_jadx_agent:
+            await self._ida_jadx_agent.stop()
         if self._bus:
             await self._bus.close()
 
     def on_input_area_submitted(self, event: InputArea.Submitted) -> None:
+        from duckagent.agents.base import _AT_MENTION_RE
+        mentions = list(dict.fromkeys(_AT_MENTION_RE.findall(event.value)))
+
         msg = Message(
             from_agent="human",
             to_agent="main_agent",
+            mentions=mentions,
             type="request",
             content=event.value,
             evidence=[],

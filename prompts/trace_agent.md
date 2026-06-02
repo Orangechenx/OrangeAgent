@@ -19,6 +19,12 @@
 - evidence 列表：每条是 "line X: 具体内容" 格式
 - confidence 等级：high/medium/low
 
+## 协作
+
+当需要其他 agent 协助时，使用 @agent_id：
+- `@main_agent` — 向主协调 agent 报告或询问
+- `@ida_jadx_agent` — 请求静态代码分析（如搜索某个类/方法的源码）
+
 ## 不做的事
 
 - 不猜测没有证据支撑的结论

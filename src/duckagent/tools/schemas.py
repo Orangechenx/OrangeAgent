@@ -112,3 +112,230 @@ TRACE_CROSS_REF_TOOL = {
 }
 
 TRACE_TOOLS = [TRACE_SEARCH_TOOL, TRACE_CONTEXT_TOOL, TRACE_CROSS_REF_TOOL]
+
+
+# --- JADX static analysis tools ---
+
+JADX_SEARCH_CLASSES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_search_classes_by_keyword",
+        "description": (
+            "Search decompiled APK code for classes containing a keyword. "
+            "Can search in class names, method names, fields, code bodies, or comments. "
+            "Use this as your primary discovery tool to find relevant code."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "search_term": {
+                    "type": "string",
+                    "description": "The keyword or string to search for.",
+                },
+                "package": {
+                    "type": "string",
+                    "description": "Optional package name to limit search scope.",
+                },
+                "search_in": {
+                    "type": "string",
+                    "enum": ["class", "method", "field", "code", "comment"],
+                    "description": "Search scope: class names, method names, fields, code bodies, or comments.",
+                },
+                "offset": {"type": "integer", "description": "Pagination offset.", "minimum": 0},
+                "count": {"type": "integer", "description": "Max results (1-50).", "minimum": 1, "maximum": 50},
+            },
+            "required": ["search_term"],
+        },
+    },
+}
+
+JADX_GET_CLASS_SOURCE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_class_source",
+        "description": "Fetch the decompiled Java source code of a specific class by its full qualified name.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "class_name": {
+                    "type": "string",
+                    "description": "Full qualified class name, e.g. 'com.example.app.MainActivity'.",
+                },
+            },
+            "required": ["class_name"],
+        },
+    },
+}
+
+JADX_GET_METHOD_BY_NAME_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_method_by_name",
+        "description": "Fetch the source code of a specific method from a class.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "class_name": {
+                    "type": "string",
+                    "description": "Full qualified class name.",
+                },
+                "method_name": {
+                    "type": "string",
+                    "description": "Method name to fetch (without parameter types).",
+                },
+            },
+            "required": ["class_name", "method_name"],
+        },
+    },
+}
+
+JADX_GET_XREFS_TO_CLASS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_xrefs_to_class",
+        "description": "Find all references to a class throughout the APK codebase.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "class_name": {
+                    "type": "string",
+                    "description": "Full qualified class name to find references to.",
+                },
+                "offset": {"type": "integer", "description": "Pagination offset.", "minimum": 0},
+                "count": {"type": "integer", "description": "Max results (1-50).", "minimum": 1, "maximum": 50},
+            },
+            "required": ["class_name"],
+        },
+    },
+}
+
+JADX_GET_XREFS_TO_METHOD_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_xrefs_to_method",
+        "description": "Find all call sites of a specific method throughout the APK codebase.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "class_name": {
+                    "type": "string",
+                    "description": "Full qualified class name containing the method.",
+                },
+                "method_name": {
+                    "type": "string",
+                    "description": "Method name to find call sites for.",
+                },
+                "offset": {"type": "integer", "description": "Pagination offset.", "minimum": 0},
+                "count": {"type": "integer", "description": "Max results (1-50).", "minimum": 1, "maximum": 50},
+            },
+            "required": ["class_name", "method_name"],
+        },
+    },
+}
+
+JADX_GET_METHODS_OF_CLASS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_methods_of_class",
+        "description": "List all method names in a class.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "class_name": {
+                    "type": "string",
+                    "description": "Full qualified class name.",
+                },
+            },
+            "required": ["class_name"],
+        },
+    },
+}
+
+JADX_GET_FIELDS_OF_CLASS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_fields_of_class",
+        "description": "List all field names in a class.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "class_name": {
+                    "type": "string",
+                    "description": "Full qualified class name.",
+                },
+            },
+            "required": ["class_name"],
+        },
+    },
+}
+
+JADX_GET_ANDROID_MANIFEST_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_android_manifest",
+        "description": "Retrieve and return the AndroidManifest.xml content.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+}
+
+JADX_GET_SMALI_OF_CLASS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_smali_of_class",
+        "description": "Fetch the smali bytecode representation of a class (useful for deep analysis).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "class_name": {
+                    "type": "string",
+                    "description": "Full qualified class name.",
+                },
+            },
+            "required": ["class_name"],
+        },
+    },
+}
+
+JADX_GET_STRINGS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_strings",
+        "description": "Retrieve contents of strings.xml resource files.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "offset": {"type": "integer", "description": "Pagination offset.", "minimum": 0},
+                "count": {"type": "integer", "description": "Max results (0 = all).", "minimum": 0},
+            },
+        },
+    },
+}
+
+JADX_GET_MAIN_ACTIVITY_CLASS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "jadx_get_main_activity_class",
+        "description": "Fetch the main activity class from AndroidManifest.xml.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+}
+
+JADX_TOOLS = [
+    JADX_SEARCH_CLASSES_TOOL,
+    JADX_GET_CLASS_SOURCE_TOOL,
+    JADX_GET_METHOD_BY_NAME_TOOL,
+    JADX_GET_XREFS_TO_CLASS_TOOL,
+    JADX_GET_XREFS_TO_METHOD_TOOL,
+    JADX_GET_METHODS_OF_CLASS_TOOL,
+    JADX_GET_FIELDS_OF_CLASS_TOOL,
+    JADX_GET_ANDROID_MANIFEST_TOOL,
+    JADX_GET_SMALI_OF_CLASS_TOOL,
+    JADX_GET_STRINGS_TOOL,
+    JADX_GET_MAIN_ACTIVITY_CLASS_TOOL,
+]

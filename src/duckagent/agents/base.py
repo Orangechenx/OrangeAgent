@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from typing import Any
 
 import litellm
@@ -9,6 +10,8 @@ from duckagent.bus import Message, MessageBus
 from duckagent.verify import hard_verify, VerificationError, self_check
 
 logger = structlog.get_logger()
+
+_AT_MENTION_RE = re.compile(r"(?<!\w)@(\w[\w_-]*\w)")
 
 
 class BaseAgent:
@@ -33,9 +36,6 @@ class BaseAgent:
         self.model = model
         self.verify_enabled = verify_enabled
         self.verify_max_retries = verify_max_retries
-        self.context: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt}
-        ]
         self._queue: asyncio.Queue[Message] | None = None
         self._task: asyncio.Task | None = None
 
@@ -78,8 +78,21 @@ class BaseAgent:
                     reply_to=msg.id,
                 ))
 
+    @staticmethod
+    def _parse_mentions(text: str) -> list[str]:
+        """Extract unique @agent_id mentions in order of first appearance."""
+        return list(dict.fromkeys(_AT_MENTION_RE.findall(text)))
+
     async def on_message(self, msg: Message) -> None:
-        """Handle an incoming message. Subclasses must override this."""
+        """Handle an incoming message.
+
+        Default behavior: if mentions is non-empty and this agent is not
+        mentioned, skip processing. If mentions is empty (broadcast), process.
+        Subclasses should override for specific behavior but may call
+        super().on_message(msg) as a guard.
+        """
+        if msg.mentions and self.agent_id not in msg.mentions:
+            return
         raise NotImplementedError
 
     async def _broadcast_status(self, state: str, task_summary: str = "") -> None:
@@ -96,17 +109,20 @@ class BaseAgent:
 
     async def think(self, input_text: str, *, tools: list[dict] | None = None,
                     tool_executor: Any = None, max_iterations: int = 50) -> str:
-        """Call the LLM with accumulated context and return the response.
+        """Call the LLM with a fresh context each time — no cross-message accumulation.
 
-        If tools and tool_executor are provided, enters an agentic loop:
-        the model can call tools, results are appended to context, and the
-        model is called again until it produces a final text response.
+        Bus messages are not LLM context. Each think() call starts from just the
+        system prompt + this input. The tool calling loop extends context locally
+        within a single call, but that context is discarded when think() returns.
         """
-        self.context.append({"role": "user", "content": input_text})
+        context: list[dict[str, Any]] = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": input_text},
+        ]
         await self._broadcast_status("thinking", task_summary=input_text[:80])
 
         for _ in range(max_iterations):
-            kwargs: dict[str, Any] = {"model": self.model, "messages": self.context}
+            kwargs: dict[str, Any] = {"model": self.model, "messages": context}
             if tools:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
@@ -121,7 +137,7 @@ class BaseAgent:
                     tc.model_dump() if hasattr(tc, "model_dump") else tc
                     for tc in tool_calls
                 ]
-            self.context.append(assistant_entry)
+            context.append(assistant_entry)
 
             if not tool_calls:
                 await self._broadcast_status("idle")
@@ -136,7 +152,7 @@ class BaseAgent:
                 name = tc.function.name
                 arguments = json.loads(tc.function.arguments)
                 result = tool_executor.execute(name, arguments)
-                self.context.append({
+                context.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "name": name,
@@ -169,11 +185,20 @@ class BaseAgent:
         evidence: list[str] | None = None,
         confidence: str = "high",
         reply_to: str | None = None,
+        mentions: list[str] | None = None,
     ) -> None:
-        """Send a message through the bus, with optional self-verification."""
+        """Send a message through the bus, with optional self-verification.
+
+        If `mentions` is None, @agent_id patterns are auto-parsed from content.
+        Pass an explicit list (including empty) to override.
+        """
+        if mentions is None:
+            mentions = self._parse_mentions(content)
+
         msg = Message(
             from_agent=self.agent_id,
             to_agent=to,
+            mentions=mentions,
             type=type,
             content=content,
             evidence=evidence or [],
@@ -198,6 +223,7 @@ class BaseAgent:
                     await self.bus.publish(Message(
                         from_agent=self.agent_id,
                         to_agent="human",
+                        mentions=mentions,
                         type="question",
                         content=(
                             f"自校验连续失败 {self.verify_max_retries} 次，"
@@ -213,9 +239,12 @@ class BaseAgent:
                     f"你的上一个结论未通过自校验: {result.reason}\n"
                     f"请重新分析并给出修正后的结论。"
                 )
+                # Re-parse mentions from retry response
+                retry_mentions = self._parse_mentions(retry_response) if mentions else []
                 msg = Message(
                     from_agent=self.agent_id,
                     to_agent=to,
+                    mentions=retry_mentions,
                     type=type,
                     content=retry_response,
                     evidence=evidence or [],

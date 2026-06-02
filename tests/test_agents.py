@@ -68,7 +68,8 @@ async def test_agent_receives_message(bus):
 
 
 @pytest.mark.asyncio
-async def test_agent_context_accumulates(bus):
+async def test_agent_context_is_per_call(bus):
+    """Context is built fresh each think() call, not accumulated across messages."""
     with patch("duckagent.agents.base.litellm.acompletion") as mock_llm:
         mock_llm.return_value = AsyncMock(
             choices=[AsyncMock(message=AsyncMock(content="response"))]
@@ -93,8 +94,8 @@ async def test_agent_context_accumulates(bus):
         ))
         await asyncio.sleep(0.2)
 
-        # system + user msg + assistant response
-        assert len(agent.context) == 3
+        # Context is NOT a persistent attribute — each think() builds its own
+        assert not hasattr(agent, "context")
 
         await agent.stop()
 

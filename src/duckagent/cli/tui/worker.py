@@ -10,11 +10,19 @@ from duckagent.cli.tui.widgets.agent_card import AgentCard
 from duckagent.cli.tui.widgets.message import MessageWidget
 
 
-async def consume_human_queue(app: App, queue: asyncio.Queue[Message]) -> None:
-    """Consume messages addressed to human and render them in the #messages panel."""
+async def consume_observer_queue(app: App, queue: asyncio.Queue[Message]) -> None:
+    """Consume ALL messages from the bus observer and render non-status messages.
+
+    Human messages are rendered immediately in on_input_area_submitted,
+    so we skip them here to avoid duplicates.
+    All other messages (agent→human, agent↔agent) are rendered here.
+    """
     while True:
         msg = await queue.get()
         if msg.type == "status":
+            continue
+        # Human messages are already mounted immediately on submit
+        if msg.from_agent == "human":
             continue
         try:
             container = app.query_one("#messages", VerticalScroll)
