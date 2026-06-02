@@ -4,6 +4,7 @@ from pathlib import Path
 
 import aiosqlite
 
+from .interface import MessageBus
 from .models import Message
 
 _CREATE_TABLE = """
@@ -22,7 +23,7 @@ CREATE TABLE IF NOT EXISTS messages (
 """
 
 
-class MessageBus:
+class LocalMessageBus(MessageBus):
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
@@ -171,3 +172,7 @@ class MessageBus:
             timestamp=row[8],
             reply_to=row[9],
         )
+
+
+# Backward-compatible alias — existing code imports MessageBus from store
+MessageBus = LocalMessageBus

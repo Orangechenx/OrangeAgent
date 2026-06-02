@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from duckagent.bus import Message, MessageBus
+from duckagent.bus import Message, LocalMessageBus
 from duckagent.agents.main_agent import MainAgent
 from duckagent.agents.trace_agent import TraceAgent
 
@@ -12,7 +12,7 @@ from duckagent.agents.trace_agent import TraceAgent
 @pytest.fixture
 async def system(tmp_path):
     db_path = tmp_path / "test.db"
-    bus = MessageBus(db_path=db_path)
+    bus = LocalMessageBus(db_path=db_path)
     await bus.initialize()
 
     prompts_dir = tmp_path / "prompts"

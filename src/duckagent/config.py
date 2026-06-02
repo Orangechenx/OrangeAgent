@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     jadx_host: str = "127.0.0.1"
     jadx_port: int = 8650
 
+    # Bus transport
+    bus_transport: str = "local"  # "local" | "http"
+    bus_server_host: str = "127.0.0.1"
+    bus_server_port: int = 8720
+
     model_config = {"env_prefix": "DUCKAGENT_"}
 
     @property
@@ -39,6 +44,14 @@ class Settings(BaseSettings):
         if self.trace_bl_file:
             files["bl"] = Path(self.trace_bl_file)
         return files
+
+    @property
+    def bus_server_url(self) -> str:
+        return f"http://{self.bus_server_host}:{self.bus_server_port}"
+
+    @property
+    def is_http_mode(self) -> bool:
+        return self.bus_transport == "http"
 
 
 settings = Settings()

@@ -1,4 +1,5 @@
+from .interface import MessageBus
 from .models import Message
-from .store import MessageBus
+from .store import LocalMessageBus
 
-__all__ = ["Message", "MessageBus"]
+__all__ = ["MessageBus", "Message", "LocalMessageBus"]

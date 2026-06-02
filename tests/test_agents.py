@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from duckagent.agents.base import BaseAgent
-from duckagent.bus import Message, MessageBus
+from duckagent.bus import Message, LocalMessageBus
 
 
 class EchoAgent(BaseAgent):
@@ -22,7 +22,7 @@ class EchoAgent(BaseAgent):
 
 @pytest.fixture
 async def bus(tmp_path):
-    b = MessageBus(db_path=tmp_path / "test.db")
+    b = LocalMessageBus(db_path=tmp_path / "test.db")
     await b.initialize()
     yield b
     await b.close()
@@ -216,7 +216,7 @@ async def test_trace_agent_analyzes_request(bus, tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_broadcasts_thinking_status(tmp_path):
-    bus = MessageBus(db_path=tmp_path / "test.db")
+    bus = LocalMessageBus(db_path=tmp_path / "test.db")
     await bus.initialize()
 
     status_queue = bus.subscribe("_tui")
