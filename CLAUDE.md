@@ -4,20 +4,33 @@
 
 多 Agent 协作系统，用于 Android 逆向工程。Agent 平权——通过 @mention 互相点名，不设中心路由。
 
-当前阶段：Phase 2 — 主 Agent + Trace Agent + IdaJadx Agent + @mention 路由 + Textual TUI。
+当前阶段：Phase 3 — HTTP 消息总线 + 多进程 + Textual TUI。
 
 ## 技术栈
 
 - 语言：Python 3.12+
 - 模型调用：litellm（统一接口，切模型只改配置）
-- 消息总线：SQLite 持久化 + asyncio.Queue 内存分发 + Observer 模式（TUI 全局可见）
+- 消息总线：MessageBus ABC → LocalMessageBus（SQLite + asyncio.Queue）+ HttpMessageBus（HTTP + WebSocket）
+- 服务端：FastAPI + uvicorn（独立进程）
 - Trace 工具：ak_search（C daemon，mmap + 行索引）
 - JADX 工具：HTTP 直连 JADX Java Plugin（127.0.0.1:8650）
 - 包管理：uv
 - CLI：typer + Textual TUI
-- 下一阶段：HTTP 消息总线 + 多进程（Agent 各自独立进程，WebSocket 通信）
+- 下一阶段：Unidbg Agent、重连机制、HTTP 双向 WebSocket 优化
 
 ## 架构
+
+### 多进程模式（`duck launch`）
+
+```
+进程: bus-server (FastAPI + SQLite + WebSocket)     :8720
+进程: main-agent  ──┐
+进程: trace-agent ──┼── HTTP POST /api/v1/publish + WS /ws?agent_id=<id>
+进程: ida-agent   ──┘
+进程: tui         ──── WS /ws?role=observer (看全部) + HTTP POST (发消息)
+```
+
+### 单进程模式（`duck run`，向后兼容）
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -155,19 +168,57 @@ Agent 在 `think()` 中自动广播状态（thinking / tool_calling / idle），
 - 校验失败不重试，降级 confidence 交用户裁决
 - 校验和重试分离
 
+## 消息总线：双模式
+
+### LocalMessageBus（单进程）
+
+- SQLite 持久化 + asyncio.Queue 内存分发
+- `_dispatch()` 在发布端解析收件人，直接 put 到队列
+- 测试和开发默认使用
+
+### HttpMessageBus（多进程）
+
+- HTTP POST `/api/v1/publish` 发布消息
+- WebSocket `/ws?agent_id=<id>` 接收消息（服务端推送）
+- 路由逻辑在 FastAPI 服务端（`server/dispatcher.py`）
+- `ConnectionManager` 管理三种连接：agent、observer、status
+- `subscribe()` 保持同步返回 `asyncio.Queue`——Agent 代码零改动
+
+### Bus Server API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/publish` | POST | 发布消息，非 status 持久化 |
+| `/api/v1/history` | GET | 查询历史（支持 from/type/limit 过滤） |
+| `/api/v1/health` | GET | 健康检查 |
+| `/ws?agent_id=<id>` | WS | Agent 连接，服务端过滤推送 |
+| `/ws?role=observer` | WS | Observer 连接，推送全部消息 |
+| `/ws?role=status` | WS | Status 连接，仅推送状态消息 |
+
 ## 目录结构
 
 ```
 src/duckagent/
 ├── __init__.py
 ├── bus/
+│   ├── interface.py       # MessageBus ABC（8 个抽象方法）
 │   ├── models.py          # Message 数据模型（含 mentions）
-│   └── store.py           # MessageBus: SQLite + Queue 分发 + Observer + mentions 路由
+│   ├── store.py           # LocalMessageBus: SQLite + Queue 分发
+│   └── http_client.py     # HttpMessageBus: HTTP POST + WebSocket 接收
+├── server/
+│   ├── app.py             # FastAPI app + lifespan
+│   ├── routes.py          # REST + WebSocket 端点
+│   ├── ws_manager.py      # ConnectionManager（agent/observer/status）
+│   ├── db.py              # SQLite 持久层
+│   └── dispatcher.py      # 纯函数路由逻辑
 ├── agents/
-│   ├── base.py            # BaseAgent: 生命周期、think()（局部上下文）、send()、@mention 解析
+│   ├── base.py            # BaseAgent: 生命周期、think()、send()、@mention 解析
 │   ├── main_agent.py      # MainAgent: @mention 路由、JSON 清理
-│   ├── trace_agent.py     # TraceAgent: tool calling 分析 trace，只响应 request/question
-│   └── ida_jadx_agent.py  # IdaJadxAgent: JADX 静态分析，只响应 request/question
+│   ├── trace_agent.py     # TraceAgent: tool calling 分析 trace
+│   └── ida_jadx_agent.py  # IdaJadxAgent: JADX 静态分析
+├── processes/
+│   ├── agent_process.py   # Agent 进程入口（工厂 + 信号处理）
+│   └── tui_process.py     # TUI 进程入口（HttpMessageBus observer 模式）
 ├── tools/
 │   ├── protocol.py        # ToolExecutor protocol
 │   ├── schemas.py         # trace + JADX tool schemas
@@ -177,16 +228,17 @@ src/duckagent/
 │   ├── hard.py            # 硬校验
 │   └── self_check.py      # 模型自查
 ├── cli/
-│   ├── app.py             # typer CLI: run/log/send
+│   ├── app.py             # typer CLI: run/log/send/server/launch/agent
 │   └── tui/
-│       ├── app.py         # DuckApp (Textual): 3 Agent 生命周期 + @mention 输入解析
+│       ├── app.py         # DuckApp (Textual): local/http 双模式
 │       ├── app.tcss       # CSS 布局 + GitHub-dark 配色
-│       ├── worker.py      # Observer → UI: consume_observer_queue + consume_status_queue
+│       ├── worker.py      # Observer → UI
 │       └── widgets/
 │           ├── input_area.py   # 自适应输入框
-│           ├── message.py      # Markdown 消息渲染 + mentions 显示
+│           ├── message.py      # Markdown 消息渲染
 │           └── agent_card.py   # Agent 状态卡片
-└── config.py              # pydantic-settings 配置（含 jadx_host/jadx_port）
+├── launcher.py            # 多进程启动器（subprocess.Popen）
+└── config.py              # pydantic-settings 配置
 tools/search/              # ak_search C 源码 + 编译产物
 prompts/                   # agent system prompts
 ```
@@ -194,16 +246,32 @@ prompts/                   # agent system prompts
 ## 使用方式
 
 ```bash
-# 启动 TUI 交互模式
+# === 单进程模式（开发/测试） ===
+
+# 启动 TUI（agent 运行在同一进程）
 uv run duck run
 
-# 查看消息历史
-uv run duck log
+# 纯命令行
+uv run duck send "@trace_agent 分析签名"
 uv run duck log --from trace_agent --limit 10
 
-# 发送单条消息（非交互）
-uv run duck send "分析 trace 里的加密算法"
-uv run duck send "@trace_agent 分析签名 @ida_jadx_agent 搜索加密类"
+# === 多进程模式（生产） ===
+
+# 一键启动全部进程（server + 3 agents + TUI）
+uv run duck launch --port 8720
+
+# 或手动分步启动：
+uv run duck server --port 8720              # 终端 1: 总线服务
+uv run duck agent main_agent --server-url http://127.0.0.1:8720   # 终端 2
+uv run duck agent trace_agent --server-url http://127.0.0.1:8720  # 终端 3
+uv run duck agent ida_jadx_agent --server-url http://127.0.0.1:8720  # 终端 4
+uv run duck run --transport http --server-url http://127.0.0.1:8720  # 终端 5: TUI
+
+# 直接用 curl 调试
+curl http://127.0.0.1:8720/api/v1/history
+curl -X POST http://127.0.0.1:8720/api/v1/publish \
+  -H "Content-Type: application/json" \
+  -d '{"from_agent":"human","to_agent":"main_agent","mentions":[],"type":"request","content":"hello","evidence":[],"confidence":"high"}'
 
 # 运行测试
 uv run pytest tests/ -v
@@ -214,21 +282,29 @@ uv run pytest tests/ -v
 通过 `.env` 文件（不提交到 git）：
 
 ```bash
-# DeepSeek 官方 API（OpenAI 兼容）
+# === LLM ===
 OPENAI_API_KEY=sk-xxx
 OPENAI_API_BASE=https://api.deepseek.com/v1
 DUCKAGENT_LITELLM_MODEL=openai/deepseek-chat
 
-# Trace 文件
+# === 消息总线 ===
+DUCKAGENT_BUS_TRANSPORT=local           # local | http
+DUCKAGENT_BUS_SERVER_HOST=127.0.0.1
+DUCKAGENT_BUS_SERVER_PORT=8720
+
+# === 数据库 ===
+DUCKAGENT_DB_DIR=.duckagent
+
+# === Trace 文件 ===
 DUCKAGENT_TRACE_CODE_FILE=/path/to/code.log
 DUCKAGENT_TRACE_RW_FILE=/path/to/rw.log
 DUCKAGENT_TRACE_BL_FILE=/path/to/bl.log
 
-# JADX（默认值）
+# === JADX ===
 DUCKAGENT_JADX_HOST=127.0.0.1
 DUCKAGENT_JADX_PORT=8650
 
-# 自校验（已关闭）
+# === 自校验（已关闭） ===
 DUCKAGENT_VERIFY_ENABLED=false
 DUCKAGENT_VERIFY_MAX_RETRIES=3
 ```
@@ -241,24 +317,6 @@ DUCKAGENT_VERIFY_MAX_RETRIES=3
 - **bl.log** — PLT/函数调用：`code行号: [跳转地址][参数索引]: 函数符号名` + 参数 dump
 
 TraceAgent 通过 tool calling 自主搜索这些文件，不需要手动切片。
-
-## 下一阶段：HTTP 总线 + 多进程
-
-目前所有 Agent 跑在同一 asyncio 进程，通过 `asyncio.Queue` 通信。切换目标是：
-
-```
-Agent进程1 ──WebSocket──┐
-Agent进程2 ──WebSocket──┼──→ Bus Server (HTTP + SQLite)
-Agent进程3 ──WebSocket──┘
-TUI进程    ──WebSocket──┘
-```
-
-切换要点：
-- **Message 已可 JSON 序列化**——无需改动
-- **Agent 逻辑零耦合**——只通过 `self.bus.publish()` / `self._queue.get()` 与总线交互
-- **唯一需改处**：`MessageBus` 抽 ABC → `LocalMessageBus`（现实现）+ `HttpMessageBus`（新实现）
-- **Bus Server**：独立 FastAPI/Starlette 进程，POST 写 SQLite，WebSocket 推消息
-- Agent 代码不动，只换 bus 实现
 
 ## 编码规范
 
@@ -278,3 +336,4 @@ TUI进程    ──WebSocket──┘
 - 宁可上报人也不要让错误结论通过
 - 不要过度设计，先跑通再迭代
 - Agent 的 prompt 是核心
+- MessageBus ABC 使得切换 local ↔ http 只需换实现，Agent 代码不动
