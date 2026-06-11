@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime, timezone
-from duckagent.bus.models import Message
+from orangeagent.bus.models import Message
 
 
 def test_message_creation():
@@ -69,7 +69,7 @@ def test_message_invalid_confidence():
 
 import asyncio
 from pathlib import Path
-from duckagent.bus.store import MessageBus
+from orangeagent.bus.store import MessageBus
 
 
 @pytest.fixture

@@ -1,8 +1,8 @@
 """Tests for the dispatcher — pure-function message routing logic."""
 
 import pytest
-from duckagent.bus.models import Message
-from duckagent.server.dispatcher import resolve_recipients, should_persist
+from orangeagent.bus.models import Message
+from orangeagent.server.dispatcher import resolve_recipients, should_persist
 
 
 def make_msg(from_agent="main_agent", to_agent=None, mentions=None, type="request"):

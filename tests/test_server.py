@@ -7,9 +7,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from duckagent.server.db import Database
-from duckagent.server.routes import router
-from duckagent.server.ws_manager import ConnectionManager
+from orangeagent.server.db import Database
+from orangeagent.server.routes import router
+from orangeagent.server.ws_manager import ConnectionManager
 
 
 def _make_app(db_path):

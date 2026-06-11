@@ -1,19 +1,31 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
-build/
+*.py[cod]
+*.egg-info/
 dist/
+build/
 wheels/
-*.egg-info
 
-CLAUDE.md
-
-# Virtual environments
+# Virtual environment
 .venv
+.venv*/
 
 # Secrets
 .env
 
 # Runtime data
 .duckagent/
-.superpowers/
+.orangeagent/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python version
+.python-version

@@ -5,11 +5,12 @@ import pytest
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Footer, Header
+from textual.widgets import Static
 
-from duckagent.cli.tui.widgets.input_area import InputArea
-from duckagent.cli.tui.widgets.message import MessageWidget
-from duckagent.cli.tui.widgets.agent_card import AgentCard
-from duckagent.bus.models import Message as BusMessage
+from orangeagent.cli.tui.widgets.input_area import InputArea
+from orangeagent.cli.tui.widgets.message import MessageWidget
+from orangeagent.cli.tui.widgets.agent_card import AgentCard
+from orangeagent.bus.models import Message as BusMessage
 
 
 # --- InputArea tests (Task 4) ---
@@ -73,6 +74,31 @@ async def test_message_widget_renders_markdown():
         assert widget is not None
 
 
+class MessageMetadataTestApp(App):
+    def compose(self) -> ComposeResult:
+        msg = BusMessage(
+            session_id="session-123456",
+            task_id="task-abcdef",
+            from_agent="trace_agent",
+            to_agent="human",
+            type="conclusion",
+            content="trace line 42 证明 HMAC",
+            evidence=["line 42"],
+            confidence="high",
+        )
+        yield MessageWidget(msg)
+
+
+@pytest.mark.asyncio
+async def test_message_widget_shows_task_metadata():
+    app = MessageMetadataTestApp()
+    async with app.run_test() as pilot:
+        headers = list(app.query(Static))
+        header_text = headers[0].content
+        assert "task=task-ab" in str(header_text)
+        assert "session=session" in str(header_text)
+
+
 # --- AgentCard tests (Task 6) ---
 
 class AgentCardTestApp(App):
@@ -101,8 +127,8 @@ async def test_agent_card_update_status():
 
 # --- DuckApp tests (Task 7-8) ---
 
-from duckagent.cli.tui.app import DuckApp
-from duckagent.bus.store import MessageBus
+from orangeagent.cli.tui.app import DuckApp
+from orangeagent.bus.store import MessageBus
 
 
 class DuckAppLayoutTest(App):
@@ -140,17 +166,17 @@ async def test_duck_app_instantiable():
     """Test DuckApp can be imported and instantiated."""
     app = DuckApp()
     assert app is not None
-    assert app.TITLE == "DuckAgent"
-    assert len(app.BINDINGS) == 2
+    assert app.TITLE == "OrangeAgent"
+    assert len(app.BINDINGS) == 3
 
 
 @pytest.mark.asyncio
 async def test_duck_app_bus_lifecycle():
     """Test DuckApp bus initialize and close with a real SQLite database."""
-    bus = MessageBus(db_path=Path(".duckagent/test_messages.db"))
+    bus = MessageBus(db_path=Path(".orangeagent/test_messages.db"))
     await bus.initialize()
     queue = bus.subscribe("test_agent")
     assert queue is not None
     await bus.close()
     # Clean up test db
-    Path(".duckagent/test_messages.db").unlink(missing_ok=True)
+    Path(".orangeagent/test_messages.db").unlink(missing_ok=True)

@@ -8,8 +8,8 @@ import httpx
 import pytest
 import websockets
 
-from duckagent.bus.http_client import HttpMessageBus, ConnectionError
-from duckagent.bus.models import Message
+from orangeagent.bus.http_client import HttpMessageBus, ConnectionError
+from orangeagent.bus.models import Message
 
 
 def make_msg(**kwargs):
@@ -230,10 +230,10 @@ def server_fixture(tmp_path_factory):
     db_dir = tmp_path_factory.mktemp("http_bus_test")
     port = 18721
 
-    env = {"DUCKAGENT_DB_DIR": str(db_dir)}
+    env = {"ORANGEAGENT_DB_DIR": str(db_dir)}
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "duckagent.server.app:app",
+        [sys.executable, "-m", "uvicorn", "orangeagent.server.app:app",
          "--host", "127.0.0.1", "--port", str(port),
          "--log-level", "warning"],
         env={**__import__("os").environ, **env},

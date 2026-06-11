@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from duckagent.agents.base import BaseAgent
-from duckagent.bus import Message, LocalMessageBus
+from orangeagent.agents.base import BaseAgent
+from orangeagent.bus import Message, LocalMessageBus
 
 
 class EchoAgent(BaseAgent):
@@ -30,7 +30,7 @@ async def bus(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_receives_message(bus):
-    with patch("duckagent.agents.base.litellm.acompletion") as mock_llm:
+    with patch("orangeagent.agents.base.litellm.acompletion") as mock_llm:
         mock_llm.return_value = AsyncMock(
             choices=[AsyncMock(message=AsyncMock(content="echoed back"))]
         )
@@ -70,7 +70,7 @@ async def test_agent_receives_message(bus):
 @pytest.mark.asyncio
 async def test_agent_context_is_per_call(bus):
     """Context is built fresh each think() call, not accumulated across messages."""
-    with patch("duckagent.agents.base.litellm.acompletion") as mock_llm:
+    with patch("orangeagent.agents.base.litellm.acompletion") as mock_llm:
         mock_llm.return_value = AsyncMock(
             choices=[AsyncMock(message=AsyncMock(content="response"))]
         )
@@ -102,7 +102,7 @@ async def test_agent_context_is_per_call(bus):
 
 # --- MainAgent tests ---
 
-from duckagent.agents.main_agent import MainAgent
+from orangeagent.agents.main_agent import MainAgent
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ def agent_md(tmp_path):
 
 @pytest.mark.asyncio
 async def test_main_agent_loads_agent_md(bus, agent_md):
-    with patch("duckagent.agents.base.litellm.acompletion") as mock_llm:
+    with patch("orangeagent.agents.base.litellm.acompletion") as mock_llm:
         mock_llm.return_value = AsyncMock(
             choices=[AsyncMock(message=AsyncMock(content="I'll analyze this for you."))]
         )
@@ -134,7 +134,7 @@ async def test_main_agent_loads_agent_md(bus, agent_md):
 
 @pytest.mark.asyncio
 async def test_main_agent_responds_to_human(bus, agent_md):
-    with patch("duckagent.agents.base.litellm.acompletion") as mock_llm:
+    with patch("orangeagent.agents.base.litellm.acompletion") as mock_llm:
         mock_llm.return_value = AsyncMock(
             choices=[AsyncMock(message=AsyncMock(
                 content='{"action": "respond", "to": "human", "content": "Got it, analyzing now.", "type": "conclusion", "evidence": ["user request"], "confidence": "high"}'
@@ -168,7 +168,7 @@ async def test_main_agent_responds_to_human(bus, agent_md):
 
 # --- TraceAgent tests ---
 
-from duckagent.agents.trace_agent import TraceAgent
+from orangeagent.agents.trace_agent import TraceAgent
 
 
 @pytest.mark.asyncio
@@ -176,7 +176,7 @@ async def test_trace_agent_analyzes_request(bus, tmp_path):
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir()
 
-    with patch("duckagent.agents.base.litellm.acompletion") as mock_llm:
+    with patch("orangeagent.agents.base.litellm.acompletion") as mock_llm:
         mock_llm.return_value = AsyncMock(
             choices=[AsyncMock(message=AsyncMock(
                 content="Identified AES-128-CBC. The aese instruction at line 42 confirms AES encryption."

@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from duckagent.bus import Message, LocalMessageBus
-from duckagent.agents.main_agent import MainAgent
-from duckagent.agents.trace_agent import TraceAgent
+from orangeagent.bus import Message, LocalMessageBus
+from orangeagent.agents.main_agent import MainAgent
+from orangeagent.agents.trace_agent import TraceAgent
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ async def test_full_flow_human_to_trace_and_back(system):
         mock.choices = [AsyncMock(message=AsyncMock(content=responses[idx]))]
         return mock
 
-    with patch("duckagent.agents.base.litellm.acompletion", side_effect=mock_completion):
+    with patch("orangeagent.agents.base.litellm.acompletion", side_effect=mock_completion):
         main_agent = MainAgent(
             bus=bus,
             model="test-model",
@@ -119,7 +119,7 @@ async def test_full_flow_human_to_trace_and_back(system):
 @pytest.mark.asyncio
 async def test_main_agent_mention_parsing():
     """Test that @mention parsing correctly extracts agent IDs."""
-    from duckagent.agents.base import BaseAgent
+    from orangeagent.agents.base import BaseAgent
 
     # Test basic parsing
     mentions = BaseAgent._parse_mentions("@trace_agent 分析这个")

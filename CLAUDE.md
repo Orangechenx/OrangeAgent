@@ -20,7 +20,7 @@
 
 ## 架构
 
-### 多进程模式（`duck launch`）
+### 多进程模式（`orange launch`）
 
 ```
 进程: bus-server (FastAPI + SQLite + WebSocket)     :8720
@@ -30,7 +30,7 @@
 进程: tui         ──── WS /ws?role=observer (看全部) + HTTP POST (发消息)
 ```
 
-### 单进程模式（`duck run`，向后兼容）
+### 单进程模式（`orange run`，向后兼容）
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -73,7 +73,7 @@
 
 ## TUI
 
-基于 Textual 框架，面板式布局。`duck run` 启动 TUI 模式，`duck log`/`duck send` 保留为纯命令行模式。
+基于 Textual 框架，面板式布局。`orange run` 启动 TUI 模式，`orange log`/`orange send` 保留为纯命令行模式。
 
 ```
 ┌─────────────────────────────────────────┬──────────────┐
@@ -198,7 +198,7 @@ Agent 在 `think()` 中自动广播状态（thinking / tool_calling / idle），
 ## 目录结构
 
 ```
-src/duckagent/
+src/orangeagent/
 ├── __init__.py
 ├── bus/
 │   ├── interface.py       # MessageBus ABC（8 个抽象方法）
@@ -249,23 +249,23 @@ prompts/                   # agent system prompts
 # === 单进程模式（开发/测试） ===
 
 # 启动 TUI（agent 运行在同一进程）
-uv run duck run
+uv run orange run
 
 # 纯命令行
-uv run duck send "@trace_agent 分析签名"
-uv run duck log --from trace_agent --limit 10
+uv run orange send "@trace_agent 分析签名"
+uv run orange log --from trace_agent --limit 10
 
 # === 多进程模式（生产） ===
 
 # 一键启动全部进程（server + 3 agents + TUI）
-uv run duck launch --port 8720
+uv run orange launch --port 8720
 
 # 或手动分步启动：
-uv run duck server --port 8720              # 终端 1: 总线服务
-uv run duck agent main_agent --server-url http://127.0.0.1:8720   # 终端 2
-uv run duck agent trace_agent --server-url http://127.0.0.1:8720  # 终端 3
-uv run duck agent ida_jadx_agent --server-url http://127.0.0.1:8720  # 终端 4
-uv run duck run --transport http --server-url http://127.0.0.1:8720  # 终端 5: TUI
+uv run orange server --port 8720              # 终端 1: 总线服务
+uv run orange agent main_agent --server-url http://127.0.0.1:8720   # 终端 2
+uv run orange agent trace_agent --server-url http://127.0.0.1:8720  # 终端 3
+uv run orange agent ida_jadx_agent --server-url http://127.0.0.1:8720  # 终端 4
+uv run orange run --transport http --server-url http://127.0.0.1:8720  # 终端 5: TUI
 
 # 直接用 curl 调试
 curl http://127.0.0.1:8720/api/v1/history
@@ -285,28 +285,28 @@ uv run pytest tests/ -v
 # === LLM ===
 OPENAI_API_KEY=sk-xxx
 OPENAI_API_BASE=https://api.deepseek.com/v1
-DUCKAGENT_LITELLM_MODEL=openai/deepseek-chat
+ORANGEAGENT_LITELLM_MODEL=openai/deepseek-chat
 
 # === 消息总线 ===
-DUCKAGENT_BUS_TRANSPORT=local           # local | http
-DUCKAGENT_BUS_SERVER_HOST=127.0.0.1
-DUCKAGENT_BUS_SERVER_PORT=8720
+ORANGEAGENT_BUS_TRANSPORT=local           # local | http
+ORANGEAGENT_BUS_SERVER_HOST=127.0.0.1
+ORANGEAGENT_BUS_SERVER_PORT=8720
 
 # === 数据库 ===
-DUCKAGENT_DB_DIR=.duckagent
+ORANGEAGENT_DB_DIR=.orangeagent
 
 # === Trace 文件 ===
-DUCKAGENT_TRACE_CODE_FILE=/path/to/code.log
-DUCKAGENT_TRACE_RW_FILE=/path/to/rw.log
-DUCKAGENT_TRACE_BL_FILE=/path/to/bl.log
+ORANGEAGENT_TRACE_CODE_FILE=/path/to/code.log
+ORANGEAGENT_TRACE_RW_FILE=/path/to/rw.log
+ORANGEAGENT_TRACE_BL_FILE=/path/to/bl.log
 
 # === JADX ===
-DUCKAGENT_JADX_HOST=127.0.0.1
-DUCKAGENT_JADX_PORT=8650
+ORANGEAGENT_JADX_HOST=127.0.0.1
+ORANGEAGENT_JADX_PORT=8650
 
 # === 自校验（已关闭） ===
-DUCKAGENT_VERIFY_ENABLED=false
-DUCKAGENT_VERIFY_MAX_RETRIES=3
+ORANGEAGENT_VERIFY_ENABLED=false
+ORANGEAGENT_VERIFY_MAX_RETRIES=3
 ```
 
 ## Trace 文件格式
