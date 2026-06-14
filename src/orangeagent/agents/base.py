@@ -21,6 +21,7 @@ from orangeagent.runtime.middleware import (
 )
 from orangeagent.runtime.models import RunStepRecord, ToolCallRecord
 from orangeagent.runtime.skill_store import SkillStore
+from orangeagent.tools.registry import get
 from orangeagent.tools.skill_loader import set_skill_store as _init_skill_store
 from orangeagent.runtime.sop import build_reverse_sop_context
 from orangeagent.verify import hard_verify, VerificationError, self_check
@@ -88,6 +89,7 @@ class BaseAgent:
         skill_store: SkillStore | None = None,
         skill_tags: list[str] | None = None,
         enable_default_middleware: bool = True,
+        allowed_toolsets: set[str] | None = None,
     ) -> None:
         self.agent_id = agent_id
         self._raw_system_prompt = system_prompt
@@ -99,6 +101,8 @@ class BaseAgent:
         self._task: asyncio.Task | None = None
         # 事件系统
         self._sink = sink or DISCARD
+        # 允许的工具集（None = 全部放行）
+        self._allowed_toolsets = allowed_toolsets
         # 中间件管道
         self._middleware = middleware or MiddlewarePipeline(sink=self._sink)
         if enable_default_middleware:
@@ -418,6 +422,29 @@ class BaseAgent:
         await self._broadcast_status("idle")
         return "已到最大迭代次数，未能生成最终答案。"
 
+    async def _inject_tool_result(
+        self,
+        context: list[dict[str, Any]],
+        tc: Any,
+        name: str,
+        result: str,
+    ) -> None:
+        """向上下文注入工具结果（被拦截/出错的工具也需要注入，否则 LLM 会卡住）。"""
+        truncated = _truncate_tool_output(result)
+        context.append({
+            "role": "tool", "tool_call_id": tc.id, "name": name, "content": truncated,
+        })
+        self._sink.emit(tool_call_event(
+            agent_id=self.agent_id,
+            tool_name=name,
+            arguments={},
+            result_preview=result,
+            status="error",
+            error=result[:200],
+            duration_ms=0,
+            truncated=len(result) > len(truncated),
+        ))
+
     async def _execute_tool_calls(
         self,
         tool_calls: list[Any],
@@ -436,6 +463,18 @@ class BaseAgent:
         await self._broadcast_status("tool_calling")
         for tc in tool_calls:
             name = tc.function.name
+            # ── 工具集权限检查 ──
+            if self._allowed_toolsets is not None:
+                td = get(name)
+                if td and td.toolset not in self._allowed_toolsets:
+                    result = json.dumps({
+                        "status": "error",
+                        "error": f"工具 '{name}' 属于 '{td.toolset}' 工具集，"
+                                 f"Agent '{self.agent_id}' 只允许: {self._allowed_toolsets}",
+                    }, ensure_ascii=False)
+                    await self._inject_tool_result(context, tc, name, result)
+                    continue
+
             started = time.monotonic()
             status = "ok"
             error = None

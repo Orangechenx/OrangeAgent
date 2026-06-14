@@ -17,7 +17,8 @@ class UnidbgAgent(BaseAgent):
         base_prompt = prompt_file.read_text() if prompt_file.exists() else "你是 unidbg 模拟执行 Agent。"
         super().__init__(agent_id="unidbg_agent", system_prompt=base_prompt, bus=bus, model=model,
                          verify_enabled=verify_enabled, verify_max_retries=verify_max_retries,
-                         skill_tags=["unidbg", "native"])
+                         skill_tags=["unidbg", "native"],
+                         allowed_toolsets={"unidbg"})
         self._executor = UnidbgToolExecutor()
         self._tools = UNIDBG_TOOLS
 

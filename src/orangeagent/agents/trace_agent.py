@@ -37,6 +37,7 @@ class TraceAgent(BaseAgent):
             verify_enabled=verify_enabled,
             verify_max_retries=verify_max_retries,
             skill_tags=["trace"],
+            allowed_toolsets={"trace"},
         )
 
         self._executor: LocalTraceToolExecutor | None = None

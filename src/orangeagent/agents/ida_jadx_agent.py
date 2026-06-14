@@ -42,6 +42,7 @@ class IdaJadxAgent(BaseAgent):
             verify_enabled=verify_enabled,
             verify_max_retries=verify_max_retries,
             skill_tags=["jadx", "ida", "static", "decompile"],
+            allowed_toolsets={"jadx"},
         )
 
         self._executor = JadxToolExecutor(
