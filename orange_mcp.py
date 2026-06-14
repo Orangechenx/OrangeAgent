@@ -72,7 +72,11 @@ os.chdir(_SCRIPT_DIR)
 # 加载 .env（优先项目目录，再找 home 目录）
 from dotenv import load_dotenv
 _env_loaded = load_dotenv(_SCRIPT_DIR / ".env") or load_dotenv()
-_has_api_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_BASE"))
+_has_api_key = bool(
+    os.environ.get("OPENAI_API_KEY") or
+    os.environ.get("ANTHROPIC_API_KEY") or
+    os.environ.get("DEEPSEEK_API_KEY")
+)
 
 # 确保能找到 orangeagent 包
 sys.path.insert(0, str(_SCRIPT_DIR / "src"))
@@ -198,39 +202,91 @@ def load_skill(skill_id: str) -> str:
 # ── 分析工具 ──────────────────────────────────────────────
 
 @mcp.tool()
-def orange_analyze(task: str, session_id: str = "default") -> str:
-    """提交一个逆向分析任务，OrangeAgent 会跑完发现循环后返回结论。
+def orange_analyze(task: str, model: str = "", session_id: str = "default") -> str:
+    """提交一个逆向分析任务。OrangeAgent 会用指定模型跑发现循环后返回结论。
 
-    适用于需要多步分析的场景：签名定位、壳识别、算法还原等。
+    支持所有 litellm 兼容模型，默认使用 .env 中 ORANGEAGENT_LITELLM_MODEL。
     简单查询（如"搜一个类"）直接用 jadx/frida MCP 工具更快。
 
     Args:
         task: 分析任务描述，如 '分析这个 APK 的签名算法'
+        model: 模型名，如 'openai/gpt-4o' 'deepseek/deepseek-chat'。留空则用默认
         session_id: 会话 ID，同一 session 的假设会共享
     """
-    # 简单的分析入口，返回引导信息
-    return json.dumps({
-        "status": "ok",
-        "message": f"收到分析任务: {task}",
-        "workflow": [
-            "1. @hypothesis_create 记录初始猜想",
-            "2. 用 jadx/frida/trace MCP 工具验证",
-            "3. @hypothesis_verify 或 @hypothesis_reject",
-            "4. @hypothesis_check_dead_end 避免重复",
-            "5. @skills_list 或 @load_skill 获取技能指导",
-        ],
-    }, ensure_ascii=False)
+    from orangeagent.config import settings
+    import litellm
+
+    selected = model or settings.litellm_model
+    has_key = _has_api_key or any(os.environ.get(k) for k in
+        ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"])
+
+    if not has_key:
+        return json.dumps({
+            "status": "error",
+            "error": "未配置 API key。在 .env 中设置 ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY",
+            "guide": "cp .env.example .env && 编辑填入 key",
+        }, ensure_ascii=False)
+
+    try:
+        # 构建发现循环 prompt
+        prompt = (
+            "你是一个 Android 逆向分析专家。按以下流程分析任务：\n\n"
+            "1. Observe：搜索 APK、看入口、找线索\n"
+            "2. Hypothesize：形成猜想，用 hypothesis_create 记录\n"
+            "3. Test：用 jadx/frida/trace/unidbg 等工具验证\n"
+            "4. Verify/Reject：确认或拒绝猜想\n\n"
+            f"## 分析任务\n{task}\n\n"
+            "## 可用技能\n"
+        )
+        store = _get_skill_store()
+        for s in store.list_all():
+            prompt += f"- {s.name}: {s.description}\n"
+
+        prompt += (
+            "\n返回格式：\n"
+            "{\n"
+            '  "conclusion": "最终判断",\n'
+            '  "confidence": "high/medium/low",\n'
+            '  "reasoning": ["推理步骤"],\n'
+            '  "hypotheses": [{"id": "xxx", "status": "active/verified/rejected"}]\n'
+            "}"
+        )
+
+        response = litellm.completion(
+            model=selected,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content
+
+        # 尝试解析 JSON
+        import re
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            return json_match.group()
+        return json.dumps({"status": "ok", "conclusion": content}, ensure_ascii=False)
+
+    except Exception as exc:
+        return json.dumps({
+            "status": "error",
+            "error": str(exc),
+            "hint": "检查 .env 配置：模型名是否正确、API key 是否有效",
+        }, ensure_ascii=False)
 
 
 @mcp.tool()
 def orange_status() -> str:
     """查看 OrangeAgent MCP 服务器的配置和运行状态。"""
+    from orangeagent.config import settings
     store = _get_skill_store()
     return json.dumps({
         "status": "ok",
         "version": "0.2.0",
         "env_loaded": _env_loaded,
         "has_api_key": _has_api_key,
+        "providers": settings.provider_info,
+        "default_model": settings.litellm_model,
+        "available_models": settings.model_list,
         "has_trace_files": any((
             os.environ.get("ORANGEAGENT_TRACE_CODE_FILE") or "",
             os.environ.get("ORANGEAGENT_TRACE_RW_FILE") or "",
