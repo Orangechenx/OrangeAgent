@@ -1,0 +1,11 @@
+{
+  "name": "discovery-loop",
+  "description": "逆向发现循环——Observe → Hypothesize → Test → Verify → Pivot 的方法论",
+  "tags": ["方法论", "discovery", "loop", "假设驱动", "explore"],
+  "priority": 5,
+  "entry": "SKILL.md",
+  "triggers": {
+    "commands": ["/explore", "/discover"],
+    "patterns": ["不知道从哪下手", "怎么分析", "探索", "没有头绪", "找不到"]
+  }
+}
