@@ -12,7 +12,7 @@ from orangeagent.tools.registry import (
 )
 from orangeagent.runtime.middleware import (
     MiddlewarePipeline, MiddlewareHandler, MiddlewareResult,
-    audit_middleware, inject_context_middleware,
+    audit_middleware, inject_context_middleware, ToolStormBreaker,
 )
 from orangeagent.runtime.event import Event
 from orangeagent.runtime.skill_store import SkillStore, SkillDef
@@ -404,3 +404,180 @@ class TestSkillStore:
         assert d["tags"] == ["a"]
         assert d["steps"] == [{"tool": "x"}]
         assert d["source_file"] == "/path/to/skill.yaml"
+
+    def test_resolve_turn_keyword_match(self, tmp_path):
+        """resolve_turn 关键词评分匹配"""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        store = SkillStore(skills_dir)
+        store._skills["ssl-bypass"] = SkillDef(
+            name="ssl-bypass", description="SSL Pinning bypass",
+            tags=["ssl", "hook"], priority=10,
+        )
+        store._skills["vmp"] = SkillDef(
+            name="vmp", description="VMP dump", tags=["vmp"],
+        )
+        res = store.resolve_turn("ssl pinning 绕过", tags=["ssl"])
+        names = [m.skill.name for m in res.active]
+        assert "ssl-bypass" in names
+
+    def test_catalog_instruction(self, tmp_path):
+        """catalog_instruction 生成技能目录"""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        store = SkillStore(skills_dir)
+        store._skills["test"] = SkillDef(name="test", description="测试技能", tags=["test"])
+        catalog = store.catalog_instruction(budget=2000)
+        assert "test" in catalog
+        assert "测试技能" in catalog
+
+    def test_resolve_turn_explicit_mention(self, tmp_path):
+        """显式提及 @name 最高分"""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        store = SkillStore(skills_dir)
+        store._skills["scan"] = SkillDef(name="scan", description="scan", priority=0)
+        res = store.resolve_turn("用 @scan 分析")
+        assert any(m.skill.name == "scan" and m.score >= 1000 for m in res.active)
+
+    def test_skill_instruction_text_with_entry(self, tmp_path):
+        """instruction_text 返回 Markdown 内容"""
+        s = SkillDef(name="test", description="test", entry_content="# 测试指令\n\n步骤1", steps=[{"tool": "x"}])
+        text = s.instruction_text()
+        assert "# 测试指令" in text
+        assert "步骤1" in text
+
+    def test_skill_instruction_text_fallback(self, tmp_path):
+        """无 entry_content 时回退到 steps"""
+        s = SkillDef(name="test", description="test", steps=[{"tool": "x", "description": "do x"}])
+        text = s.instruction_text()
+        assert "do x" in text
+
+
+# ═══════════════════════════════════════════════════════════════
+# Hypothesis 工具测试
+# ═══════════════════════════════════════════════════════════════
+
+class TestHypothesisTools:
+    """假设追踪 5 工具测试"""
+
+    def test_create_and_verify(self):
+        """创建假设 → 验证通过"""
+        from orangeagent.tools.hypothesis_tools import hypothesis_create, hypothesis_verify
+        r1 = hypothesis_create(description="可能是 AES-128", tags="aes,cbc")
+        assert "hypothesis_id" in r1
+        r2 = hypothesis_verify(hypothesis_id="1", evidence="trace 确认 AES 指令")
+        assert "已验证" in r2
+
+    def test_create_and_reject(self):
+        """创建假设 → 拒绝 + dead end"""
+        from orangeagent.tools.hypothesis_tools import hypothesis_create, hypothesis_reject, hypothesis_check_dead_end
+        hypothesis_create(description="可能是 MD5", tags="md5")
+        r = hypothesis_reject(hypothesis_id="2", reason="不是 MD5")
+        assert "已拒绝" in r
+        # 检查 dead end
+        r2 = hypothesis_check_dead_end(description="可能是 MD5")
+        assert r2["is_dead_end"] if isinstance(r2, dict) else "dead_end" in r2
+
+    def test_list_by_status(self):
+        """按状态过滤假设"""
+        from orangeagent.tools.hypothesis_tools import hypothesis_create, hypothesis_verify, hypothesis_list
+        hypothesis_create(description="H1", tags="")
+        hypothesis_create(description="H2", tags="")
+        hypothesis_verify(hypothesis_id="4", evidence="ok")
+        active = hypothesis_list(status="active")
+        all_h = hypothesis_list(status="all")
+        assert "active" in active or "ok" in active
+
+    def test_check_dead_end_no_match(self):
+        """不存在的 dead end 返回未发现"""
+        from orangeagent.tools.hypothesis_tools import hypothesis_check_dead_end
+        r = hypothesis_check_dead_end(description="RSA 加密")
+        assert isinstance(r, str)
+        assert "未发现" in r or "ok" in r
+
+    def test_invalid_hypothesis(self):
+        """验证不存在的假设返回错误"""
+        from orangeagent.tools.hypothesis_tools import hypothesis_verify
+        r = hypothesis_verify(hypothesis_id="999", evidence="test")
+        assert "error" in r
+
+
+# ═══════════════════════════════════════════════════════════════
+# ToolStormBreaker 测试
+# ═══════════════════════════════════════════════════════════════
+
+class TestStormBreaker:
+    """工具风暴抑制器测试"""
+
+    def test_suppress_repeated_calls(self):
+        """重复相同调用达到阈值后抑制"""
+        breaker = ToolStormBreaker(window_size=5, threshold=3)
+        for i in range(4):
+            suppressed = breaker.check("trace_search", {"query": "AES"})
+        assert suppressed  # 第 4 次应被抑制
+
+    def test_different_args_not_suppressed(self):
+        """不同参数不被抑制"""
+        breaker = ToolStormBreaker(window_size=5, threshold=3)
+        for i in range(4):
+            suppressed = breaker.check("trace_search", {"query": f"query_{i}"})
+        assert not suppressed
+
+    def test_reset_clears_window(self):
+        """reset 清空窗口"""
+        breaker = ToolStormBreaker(window_size=5, threshold=2)
+        breaker.check("tool", {"x": 1})
+        breaker.check("tool", {"x": 1})
+        breaker.reset()
+        # reset 后应该重新计数
+        r = breaker.check("tool", {"x": 1})
+        assert not r
+
+    def test_exempt_tools_not_suppressed(self):
+        """豁免工具不受抑制"""
+        breaker = ToolStormBreaker(window_size=5, threshold=2,
+                                    exempt_tools={"hypothesis_create"})
+        for i in range(5):
+            suppressed = breaker.check("hypothesis_create", {"description": "test"})
+        assert not suppressed
+
+    def test_below_threshold_not_suppressed(self):
+        """未达阈值不抑制"""
+        breaker = ToolStormBreaker(window_size=10, threshold=5)
+        for i in range(3):
+            r = breaker.check("tool", {"x": 1})
+        assert not r
+
+
+# ═══════════════════════════════════════════════════════════════
+# skill_loader 测试
+# ═══════════════════════════════════════════════════════════════
+
+class TestSkillLoader:
+    """load_skill 工具测试"""
+
+    def test_load_skill_uninitialized(self):
+        """未初始化时返回错误"""
+        from orangeagent.tools.skill_loader import _load_skill
+        r = _load_skill("test")
+        assert "未初始化" in r or "error" in r
+
+    def test_load_skill_not_found(self, tmp_path):
+        """加载不存在的技能返回错误"""
+        from orangeagent.runtime.skill_store import SkillStore
+        from orangeagent.tools.skill_loader import _load_skill, set_skill_store
+        store = SkillStore(tmp_path / "skills")
+        set_skill_store(store)
+        r = _load_skill("nonexistent")
+        assert "不存在" in r or "error" in r
+
+    def test_load_skill_success(self, tmp_path):
+        """成功加载技能"""
+        from orangeagent.runtime.skill_store import SkillDef
+        from orangeagent.tools.skill_loader import _load_skill, set_skill_store
+        store = SkillStore(tmp_path / "skills")
+        store._skills["test"] = SkillDef(name="test", description="测试", steps=[{"tool": "x"}])
+        set_skill_store(store)
+        r = _load_skill("test")
+        assert "ok" in r or "测试" in r
