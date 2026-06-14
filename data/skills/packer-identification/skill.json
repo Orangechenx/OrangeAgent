@@ -1,0 +1,10 @@
+{
+  "name": "packer-identification",
+  "description": "APK 加壳/加固类型识别与对应处理策略",
+  "tags": ["packer", "加固", "脱壳", "识别"],
+  "priority": 9,
+  "entry": "SKILL.md",
+  "triggers": {
+    "patterns": ["加壳", "加固", "什么壳", "packer", "保护", "反编译失败"]
+  }
+}

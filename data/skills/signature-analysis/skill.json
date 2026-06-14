@@ -1,0 +1,11 @@
+{
+  "name": "signature-analysis",
+  "description": "网络请求签名算法的定位与还原流程",
+  "tags": ["signature", "network", "hook", "算法还原"],
+  "priority": 9,
+  "entry": "SKILL.md",
+  "triggers": {
+    "commands": ["/sign"],
+    "patterns": ["签名", "signature", "sign", "加密参数"]
+  }
+}

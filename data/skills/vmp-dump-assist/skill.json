@@ -5,6 +5,6 @@
   "priority": 8,
   "entry": "SKILL.md",
   "triggers": {
-    "patterns": ["vmp", "脱壳", "libDexHelper", "dexguard", "加壳"]
+    "patterns": ["vmp", "脱壳", "libDexHelper", "dexguard", "加壳", "加固"]
   }
 }

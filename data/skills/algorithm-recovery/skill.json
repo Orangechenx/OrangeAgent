@@ -1,0 +1,10 @@
+{
+  "name": "algorithm-recovery",
+  "description": "从 Native SO 或 Java 层识别并还原加密算法",
+  "tags": ["crypto", "native", "algorithm", "so", "逆向"],
+  "priority": 8,
+  "entry": "SKILL.md",
+  "triggers": {
+    "patterns": ["加密", "解密", "算法", "crypto", "AES", "DES", "RSA", "MD5", "SHA", "HMAC", "国密", "aese", "aesd", "trace.*aes", "指令.*加密"]
+  }
+}
