@@ -16,7 +16,8 @@ class JsReverseAgent(BaseAgent):
         prompt_file = prompts_dir / "js_reverse_agent.md"
         base_prompt = prompt_file.read_text() if prompt_file.exists() else "你是 JavaScript 逆向分析 Agent。"
         super().__init__(agent_id="js_reverse_agent", system_prompt=base_prompt, bus=bus, model=model,
-                         verify_enabled=verify_enabled, verify_max_retries=verify_max_retries)
+                         verify_enabled=verify_enabled, verify_max_retries=verify_max_retries,
+                         skill_tags=["javascript", "deobfuscate"])
         self._executor = JsReverseExecutor()
         self._tools = JS_REVERSE_TOOLS
 

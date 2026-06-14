@@ -39,6 +39,7 @@ class FridaAgent(BaseAgent):
             model=model,
             verify_enabled=verify_enabled,
             verify_max_retries=verify_max_retries,
+            skill_tags=["hook", "frida", "dynamic", "ssl"],
         )
 
         self._executor = FridaToolExecutor()

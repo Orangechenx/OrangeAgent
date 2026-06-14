@@ -39,6 +39,7 @@ class NetworkAgent(BaseAgent):
             model=model,
             verify_enabled=verify_enabled,
             verify_max_retries=verify_max_retries,
+            skill_tags=["network", "traffic", "ssl"],
         )
 
         self._executor = NetworkToolExecutor()

@@ -10,9 +10,14 @@ import litellm
 import structlog
 
 from orangeagent.bus import Message, MessageBus
-from orangeagent.runtime.event import Event, EventKind, Sink, DISCARD
+from orangeagent.runtime.event import (
+    Event, EventKind, Sink, DISCARD,
+    agent_status_event, llm_call_event, tool_call_event, cache_info_event,
+)
 from orangeagent.runtime.guardrails import check_tool_policy
+from orangeagent.runtime.middleware import MiddlewarePipeline, MiddlewareResult, audit_middleware
 from orangeagent.runtime.models import RunStepRecord, ToolCallRecord
+from orangeagent.runtime.skill_store import SkillStore
 from orangeagent.runtime.sop import build_reverse_sop_context
 from orangeagent.verify import hard_verify, VerificationError, self_check
 
@@ -75,6 +80,10 @@ class BaseAgent:
         verify_enabled: bool = True,
         verify_max_retries: int = 3,
         sink: Sink | None = None,
+        middleware: MiddlewarePipeline | None = None,
+        skill_store: SkillStore | None = None,
+        skill_tags: list[str] | None = None,
+        enable_default_middleware: bool = True,
     ) -> None:
         self.agent_id = agent_id
         self._raw_system_prompt = system_prompt
@@ -86,6 +95,13 @@ class BaseAgent:
         self._task: asyncio.Task | None = None
         # 事件系统
         self._sink = sink or DISCARD
+        # 中间件管道
+        self._middleware = middleware or MiddlewarePipeline(sink=self._sink)
+        if enable_default_middleware:
+            self._middleware.use(audit_middleware(sink=self._sink))
+        # 技能系统
+        self._skill_store = skill_store
+        self._skill_tags = skill_tags or []
         # 记忆注入缓存
         self._composed_prompt: str | None = None
         self._memory_block: str | None = None
@@ -173,10 +189,10 @@ class BaseAgent:
             confidence="high",
         )
         await self.bus.publish(msg)
-        self._sink.emit(Event(
-            kind=EventKind.AGENT_STATUS,
+        self._sink.emit(agent_status_event(
             agent_id=self.agent_id,
-            data={"state": state, "task_summary": task_summary},
+            state=state,
+            task_summary=task_summary,
         ))
 
     # ─── System Prompt 合成（记忆注入优化） ─────────────────────────
@@ -198,7 +214,7 @@ class BaseAgent:
         return self._composed_prompt
 
     def _build_composed_prompt(self) -> str:
-        """构建包含 SOP + 持久记忆的 system prompt。"""
+        """构建包含 SOP + 持久记忆 + 匹配技能的 system prompt。"""
         parts = [self._raw_system_prompt]
 
         sop = build_reverse_sop_context(self.agent_id)
@@ -208,7 +224,39 @@ class BaseAgent:
         if self._memory_block:
             parts.append(self._memory_block)
 
+        # 自动注入匹配的技能
+        skills_block = self._build_skills_block()
+        if skills_block:
+            parts.append(skills_block)
+
         return "\n\n".join(parts)
+
+    def _build_skills_block(self) -> str:
+        """从技能库中匹配合适的技能，格式化为提示文本。
+
+        如果 skill_tags 为空，返回所有技能（适用于 main_agent）。
+        如果 skill_tags 有值，只返回匹配的技能。
+        """
+        if not self._skill_store:
+            return ""
+        if self._skill_tags:
+            matched = self._skill_store.find_by_tags(self._skill_tags)
+        else:
+            matched = self._skill_store.list_all()
+        if not matched:
+            return ""
+        lines = ["## 📋 匹配的逆向技能", "以下技能可能与当前任务相关："]
+        for s in matched:
+            lines.append(f"\n### {s.name}")
+            lines.append(f"  描述: {s.description}")
+            lines.append(f"  标签: {', '.join(s.tags)}")
+            for step in s.steps[:4]:  # 最多展示 4 步
+                tool_name = step.get("tool", "?")
+                desc = step.get("description", "")
+                lines.append(f"  - `{tool_name}`: {desc}")
+            if len(s.steps) > 4:
+                lines.append(f"  - …还有 {len(s.steps) - 4} 步")
+        return "\n".join(lines)
 
     def invalidate_composed_prompt(self) -> None:
         """记忆变更时失效缓存，下次 think() 重建。"""
@@ -295,15 +343,12 @@ class BaseAgent:
                 if cached_tokens > 0:
                     self._cache_hit += cached_tokens
                 self._cache_miss += max(0, prompt_tokens - cached_tokens)
-                self._sink.emit(Event(
-                    kind=EventKind.CACHE_INFO,
+                self._sink.emit(cache_info_event(
                     agent_id=self.agent_id,
-                    data={
-                        "total_tokens": total_tokens,
-                        "prompt_tokens": prompt_tokens,
-                        "cached_tokens": cached_tokens,
-                        "cache_hit_ratio": self.cache_hit_ratio,
-                    },
+                    total_tokens=total_tokens,
+                    prompt_tokens=prompt_tokens,
+                    cached_tokens=cached_tokens,
+                    cache_hit_ratio=self.cache_hit_ratio,
                 ))
 
             if session_id and run_id:
@@ -370,20 +415,59 @@ class BaseAgent:
                 await self._broadcast_status("idle")
                 return message.content or ""
 
-            await self._broadcast_status("tool_calling")
-            for tc in tool_calls:
-                name = tc.function.name
-                started = time.monotonic()
-                status = "ok"
-                error = None
-                try:
-                    arguments = json.loads(tc.function.arguments)
-                except json.JSONDecodeError as exc:
+            await self._execute_tool_calls(
+                tool_calls, tool_executor=tool_executor,
+                context=context,
+                session_id=session_id, task_id=task_id, run_id=run_id,
+            )
+
+            # ── 2e. 迭代间上下文压缩 ──
+            self._maybe_compact_context(context)
+
+        await self._broadcast_status("idle")
+        return "已到最大迭代次数，未能生成最终答案。"
+
+    async def _execute_tool_calls(
+        self,
+        tool_calls: list[Any],
+        *,
+        tool_executor: Any,
+        context: list[dict[str, Any]],
+        session_id: str | None = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        """执行一轮工具调用（核心执行逻辑）。
+
+        职责：参数解析 → 中间件拦截 → 安全策略 → executor 执行
+              → 中间件响应 → 审计记录 → 上下文注入
+        """
+        await self._broadcast_status("tool_calling")
+        for tc in tool_calls:
+            name = tc.function.name
+            started = time.monotonic()
+            status = "ok"
+            error = None
+
+            # ── 解析参数 ──
+            try:
+                arguments = json.loads(tc.function.arguments)
+            except json.JSONDecodeError as exc:
+                status = "error"
+                error = f"JSON 参数解析失败: {exc}"
+                arguments = {}
+                result = json.dumps({"status": "error", "error": error}, ensure_ascii=False)
+            else:
+                # ── 中间件：tool_request（拦截/改写） ──
+                mw_result: MiddlewareResult = self._middleware.on_tool_call_request(name, arguments)
+                if not mw_result.allowed:
                     status = "error"
-                    error = f"JSON 参数解析失败: {exc}"
-                    arguments = {}
+                    error = mw_result.reason
+                    arguments = mw_result.modified_args or arguments
                     result = json.dumps({"status": "error", "error": error}, ensure_ascii=False)
                 else:
+                    arguments = mw_result.modified_args or arguments
+                    # ── 安全策略检查 ──
                     decision = check_tool_policy(
                         agent_id=self.agent_id, tool_name=name, arguments=arguments,
                     )
@@ -398,30 +482,41 @@ class BaseAgent:
                             status = "error"
                             error = str(exc)
                             result = json.dumps({"status": "error", "error": error}, ensure_ascii=False)
-                duration_ms = int((time.monotonic() - started) * 1000)
-                await self._record_tool_call(
-                    name=name, arguments=arguments, result=result,
-                    status=status, error=error, duration_ms=duration_ms,
-                    session_id=session_id, task_id=task_id,
+                        else:
+                            # ── 中间件：tool_response（审计/改写） ──
+                            duration_ms = int((time.monotonic() - started) * 1000)
+                            result = self._middleware.on_tool_call_response(
+                                name, arguments, result, duration_ms,
+                            )
+
+            duration_ms = int((time.monotonic() - started) * 1000)
+            await self._record_tool_call(
+                name=name, arguments=arguments, result=result,
+                status=status, error=error, duration_ms=duration_ms,
+                session_id=session_id, task_id=task_id,
+            )
+            if session_id and run_id:
+                await self._record_run_step(
+                    session_id=session_id, task_id=task_id, run_id=run_id,
+                    step_type="tool", title=f"工具调用: {name}",
+                    content=result[:1000],
+                    metadata={"tool_call_id": tc.id, "arguments": arguments},
+                    status=status, duration_ms=duration_ms,
                 )
-                if session_id and run_id:
-                    await self._record_run_step(
-                        session_id=session_id, task_id=task_id, run_id=run_id,
-                        step_type="tool", title=f"工具调用: {name}",
-                        content=result[:1000],
-                        metadata={"tool_call_id": tc.id, "arguments": arguments},
-                        status=status, duration_ms=duration_ms,
-                    )
-                truncated = _truncate_tool_output(result)
-                context.append({
-                    "role": "tool", "tool_call_id": tc.id, "name": name, "content": truncated,
-                })
-
-            # ── 2e. 迭代间上下文压缩 ──
-            self._maybe_compact_context(context)
-
-        await self._broadcast_status("idle")
-        return "已到最大迭代次数，未能生成最终答案。"
+            truncated = _truncate_tool_output(result)
+            self._sink.emit(tool_call_event(
+                agent_id=self.agent_id,
+                tool_name=name,
+                arguments=arguments,
+                result_preview=result,
+                status=status,
+                error=error,
+                duration_ms=duration_ms,
+                truncated=len(result) > len(truncated),
+            ))
+            context.append({
+                "role": "tool", "tool_call_id": tc.id, "name": name, "content": truncated,
+            })
 
     def _maybe_compact_context(self, context: list[dict[str, Any]]) -> None:
         """上下文超过阈值时压缩：保留最近 N 轮工具调用。
@@ -480,6 +575,13 @@ class BaseAgent:
                 error=str(exc)[:120],
             )
             return ""
+
+    def suggest_skills(self, tags: list[str] | None = None, applies_to: str | None = None) -> list[dict]:
+        """根据标签和场景从技能库匹配合适的技能（线程安全，非阻塞）。"""
+        if self._skill_store is None:
+            return []
+        matched = self._skill_store.find_by_tags(tags=tags or [], applies_to=applies_to)
+        return [s.to_dict() for s in matched]
 
     async def _record_tool_call(
         self,

@@ -16,7 +16,8 @@ class IdaAgent(BaseAgent):
         prompt_file = prompts_dir / "ida_agent.md"
         base_prompt = prompt_file.read_text() if prompt_file.exists() else "你是 IDA Pro 静态分析 Agent。"
         super().__init__(agent_id="ida_agent", system_prompt=base_prompt, bus=bus, model=model,
-                         verify_enabled=verify_enabled, verify_max_retries=verify_max_retries)
+                         verify_enabled=verify_enabled, verify_max_retries=verify_max_retries,
+                         skill_tags=["ida", "native"])
         self._executor = IdaToolExecutor()
         self._tools = IDA_TOOLS
 

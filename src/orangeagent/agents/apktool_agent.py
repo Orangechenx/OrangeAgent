@@ -16,7 +16,8 @@ class ApktoolAgent(BaseAgent):
         prompt_file = prompts_dir / "apktool_agent.md"
         base_prompt = prompt_file.read_text() if prompt_file.exists() else "你是 APK 解包与重打包 Agent。"
         super().__init__(agent_id="apktool_agent", system_prompt=base_prompt, bus=bus, model=model,
-                         verify_enabled=verify_enabled, verify_max_retries=verify_max_retries)
+                         verify_enabled=verify_enabled, verify_max_retries=verify_max_retries,
+                         skill_tags=["apktool", "smali", "脱壳"])
         self._executor = ApkToolExecutor()
         self._tools = APKTOOL_TOOLS
 

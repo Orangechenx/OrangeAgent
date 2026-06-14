@@ -596,7 +596,10 @@ APKTOOL_TOOLS = [
 ]
 
 
-# --- JS Reverse tools ---
+# ── JS Reverse tools ──
+# 注意: js_extract_strings 和 js_deobfuscate 已迁移到 @tool 装饰器，
+# 定义在 js_reverse_executor.py 中。此处保留旧常量仅供向后兼容。
+# 新增工具请直接使用 @tool 装饰器。
 
 JS_FORMAT_TOOL = {
     "type": "function",

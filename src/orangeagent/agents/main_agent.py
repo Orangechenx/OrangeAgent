@@ -70,6 +70,7 @@ class MainAgent(BaseAgent):
             model=model,
             verify_enabled=False,  # main agent doesn't need self-check
             verify_max_retries=verify_max_retries,
+            skill_tags=[],  # empty = all skills
         )
 
     async def on_message(self, msg: Message) -> None:

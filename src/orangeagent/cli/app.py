@@ -198,6 +198,16 @@ def tools(
 
 
 @app.command()
+def skills(
+    search: str = typer.Option("", "--search", help="搜索关键词"),
+    transport: str = typer.Option("local", "--transport", help="Bus transport: local | http"),
+    server_url: str = typer.Option(None, "--server-url", help="Bus server URL (http mode)"),
+):
+    """查看已加载的逆向技能"""
+    asyncio.run(_show_skills(search, transport, server_url))
+
+
+@app.command()
 def handoffs(
     task_id: str = typer.Option(None, "--task-id", help="按 task 过滤"),
     run_id: str = typer.Option(None, "--run-id", help="按 run 过滤"),
@@ -446,6 +456,60 @@ async def _show_tools(task_id: str | None, limit: int, transport: str, server_ur
                 record.result_preview[:80],
             )
         console.print(table)
+
+
+async def _show_skills(search: str, transport: str, server_url: str | None) -> None:
+    """显示技能列表。"""
+    from orangeagent.runtime.skill_store import SkillStore
+    from pathlib import Path
+
+    # 尝试定位 skills 目录
+    candidates = [
+        Path.cwd() / "data" / "skills",
+        Path(__file__).resolve().parents[2] / "data" / "skills",
+    ]
+    skills_dir = None
+    for c in candidates:
+        if c.is_dir():
+            skills_dir = c
+            break
+
+    if not skills_dir:
+        typer.echo("⚠️  未找到技能目录（data/skills/）")
+        return
+
+    store = SkillStore(skills_dir)
+    store.load_all()
+
+    if search:
+        matched = store.search(search)
+        if not matched:
+            typer.echo(f"没有匹配 \"{search}\" 的技能")
+            return
+        results = matched
+        title = f"技能搜索: \"{search}\" ({len(results)} 个)"
+    else:
+        results = store.list_all()
+        title = f"已加载技能 ({len(results)} 个)"
+
+    if not results:
+        typer.echo("没有技能")
+        return
+
+    table = Table(title=title)
+    table.add_column("名称", style="cyan")
+    table.add_column("描述")
+    table.add_column("标签")
+    table.add_column("步骤")
+
+    for s in results:
+        table.add_row(
+            s.name,
+            s.description[:60],
+            ", ".join(s.tags[:4]),
+            str(len(s.steps)),
+        )
+    console.print(table)
 
 
 async def _show_handoffs(task_id: str | None, run_id: str | None, limit: int, transport: str, server_url: str | None) -> None:
