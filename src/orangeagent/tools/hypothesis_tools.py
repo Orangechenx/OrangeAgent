@@ -1,6 +1,8 @@
 """假设追踪工具 —— 用于逆向的 Observe → Hypothesize → Test → Verify 循环。
 
 Agent 可以通过这些工具显式记录假设、验证假设、标记 dead end。
+
+注意：假设数据按 session_id 隔离，不同 session 不互相污染。
 """
 
 from __future__ import annotations
@@ -8,14 +10,22 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from orangeagent.tools.registry import tool
 
 
-# ── 内存存储（线程安全，生命周期同进程） ──
+# ── 按 session 隔离的存储 ──
 
-_hypotheses: dict[str, dict[str, Any]] = {}
-_dead_ends: set[str] = set()
+_sessions: dict[str, dict[str, dict[str, Any]]] = {}  # session_id -> {hyp_id -> hyp}
+_dead_ends: dict[str, set[str]] = {}                   # session_id -> {description}
+
+
+def _ensure_session(session_id: str = "default") -> dict:
+    if session_id not in _sessions:
+        _sessions[session_id] = {}
+        _dead_ends[session_id] = set()
+    return _sessions[session_id]
 
 
 def now_utc() -> str:
@@ -43,8 +53,9 @@ def now_utc() -> str:
 )
 def hypothesis_create(description: str, tags: str = "") -> str:
     """创建一条假设。"""
-    hid = str(len(_hypotheses) + 1)
-    _hypotheses[hid] = {
+    session = _ensure_session()
+    hid = str(uuid4())[:8]
+    session[hid] = {
         "id": hid,
         "description": description,
         "status": "active",
@@ -82,7 +93,8 @@ def hypothesis_create(description: str, tags: str = "") -> str:
 )
 def hypothesis_verify(hypothesis_id: str, evidence: str) -> str:
     """验证一条假设。"""
-    h = _hypotheses.get(hypothesis_id)
+    session = _ensure_session()
+    h = session.get(hypothesis_id)
     if not h:
         return json.dumps({"status": "error", "error": f"假设 {hypothesis_id} 不存在"})
     h["status"] = "verified"
@@ -117,14 +129,14 @@ def hypothesis_verify(hypothesis_id: str, evidence: str) -> str:
 )
 def hypothesis_reject(hypothesis_id: str, reason: str) -> str:
     """拒绝一条假设并记录 dead end。"""
-    h = _hypotheses.get(hypothesis_id)
+    session = _ensure_session()
+    h = session.get(hypothesis_id)
     if not h:
         return json.dumps({"status": "error", "error": f"假设 {hypothesis_id} 不存在"})
     h["status"] = "rejected"
     h["evidence"].append(f"[REJECTED] {reason}")
     h["updated_at"] = now_utc()
-    # 记录 dead end
-    _dead_ends.add(h["description"])
+    _dead_ends.setdefault("default", set()).add(h["description"])
     return json.dumps({
         "status": "ok",
         "hypothesis_id": hypothesis_id,
@@ -150,13 +162,12 @@ def hypothesis_reject(hypothesis_id: str, reason: str) -> str:
 )
 def hypothesis_list(status: str = "all") -> str:
     """列出假设。"""
-    items = list(_hypotheses.values())
+    session = _ensure_session()
+    items = list(session.values())
     if status != "all":
         items = [h for h in items if h["status"] == status]
-
     if not items:
         return json.dumps({"status": "ok", "hypotheses": [], "count": 0})
-
     summary = []
     for h in items:
         summary.append({
@@ -166,7 +177,6 @@ def hypothesis_list(status: str = "all") -> str:
             "tags": h["tags"],
             "evidence_count": len(h["evidence"]),
         })
-
     return json.dumps({
         "status": "ok",
         "hypotheses": summary,
@@ -191,9 +201,9 @@ def hypothesis_list(status: str = "all") -> str:
 )
 def hypothesis_check_dead_end(description: str) -> str:
     """检查是否为 dead end。"""
-    is_dead = description in _dead_ends
-    # 模糊匹配
-    similar = [d for d in _dead_ends if any(w in d for w in description.split())]
+    ends = _dead_ends.get("default", set())
+    is_dead = description in ends
+    similar = [d for d in ends if any(w in d for w in description.split())]
     return json.dumps({
         "status": "ok",
         "is_dead_end": is_dead,

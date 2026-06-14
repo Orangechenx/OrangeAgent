@@ -463,38 +463,40 @@ class TestHypothesisTools:
 
     def test_create_and_verify(self):
         """创建假设 → 验证通过"""
+        import json
         from orangeagent.tools.hypothesis_tools import hypothesis_create, hypothesis_verify
-        r1 = hypothesis_create(description="可能是 AES-128", tags="aes,cbc")
-        assert "hypothesis_id" in r1
-        r2 = hypothesis_verify(hypothesis_id="1", evidence="trace 确认 AES 指令")
-        assert "已验证" in r2
+        r1 = json.loads(hypothesis_create(description="可能是 AES-128", tags="aes,cbc"))
+        hid = r1["hypothesis_id"]
+        r2 = json.loads(hypothesis_verify(hypothesis_id=hid, evidence="trace 确认 AES 指令"))
+        assert r2["status"] == "ok"
 
     def test_create_and_reject(self):
         """创建假设 → 拒绝 + dead end"""
+        import json
         from orangeagent.tools.hypothesis_tools import hypothesis_create, hypothesis_reject, hypothesis_check_dead_end
-        hypothesis_create(description="可能是 MD5", tags="md5")
-        r = hypothesis_reject(hypothesis_id="2", reason="不是 MD5")
-        assert "已拒绝" in r
-        # 检查 dead end
-        r2 = hypothesis_check_dead_end(description="可能是 MD5")
-        assert r2["is_dead_end"] if isinstance(r2, dict) else "dead_end" in r2
+        r1 = json.loads(hypothesis_create(description="可能是 MD5", tags="md5"))
+        hid = r1["hypothesis_id"]
+        r2 = json.loads(hypothesis_reject(hypothesis_id=hid, reason="不是 MD5"))
+        assert r2["status"] == "ok"
+        r3 = json.loads(hypothesis_check_dead_end(description="可能是 MD5"))
+        assert r3["is_dead_end"]
 
     def test_list_by_status(self):
         """按状态过滤假设"""
+        import json
         from orangeagent.tools.hypothesis_tools import hypothesis_create, hypothesis_verify, hypothesis_list
-        hypothesis_create(description="H1", tags="")
-        hypothesis_create(description="H2", tags="")
-        hypothesis_verify(hypothesis_id="4", evidence="ok")
-        active = hypothesis_list(status="active")
-        all_h = hypothesis_list(status="all")
-        assert "active" in active or "ok" in active
+        r1 = json.loads(hypothesis_create(description="H1", tags=""))
+        r2 = json.loads(hypothesis_create(description="H2", tags=""))
+        json.loads(hypothesis_verify(hypothesis_id=r2["hypothesis_id"], evidence="ok"))
+        all_h = json.loads(hypothesis_list(status="all"))
+        assert all_h["count"] >= 2
 
     def test_check_dead_end_no_match(self):
         """不存在的 dead end 返回未发现"""
+        import json
         from orangeagent.tools.hypothesis_tools import hypothesis_check_dead_end
-        r = hypothesis_check_dead_end(description="RSA 加密")
-        assert isinstance(r, str)
-        assert "未发现" in r or "ok" in r
+        r = json.loads(hypothesis_check_dead_end(description="RSA 加密"))
+        assert not r["is_dead_end"]
 
     def test_invalid_hypothesis(self):
         """验证不存在的假设返回错误"""

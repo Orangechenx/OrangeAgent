@@ -98,9 +98,11 @@ class SkillDef:
                     return 500 + self.priority
             except re.error:
                 continue
-        # 同时也匹配描述中的关键词
-        if self.description and any(w in p_lower for w in self.description.lower().split()[:5]):
-            return 500 + self.priority
+        # 同时也匹配描述中的关键词（只匹配有意义的短词，避免中文整句误匹配）
+        if self.description:
+            for w in self.description.lower().split():
+                if len(w) <= 20 and w in p_lower:
+                    return 500 + self.priority
 
         # 4. 标签匹配
         if tags and any(t in self.tags for t in tags):
