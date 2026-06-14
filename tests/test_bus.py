@@ -195,7 +195,8 @@ async def test_status_message_not_persisted(tmp_path):
     await bus.publish(msg)
 
     history = await bus.get_history(limit=100)
-    assert len(history) == 0
+    assert len(history) == 1  # status 入库了，24h 后自动清理
+    assert history[0].type == "status"
 
     await bus.close()
 

@@ -98,4 +98,4 @@ def test_should_persist_normal():
 
 
 def test_should_persist_status():
-    assert should_persist(make_msg(type="status")) is False
+    assert should_persist(make_msg(type="status")) is True  # status 已入库

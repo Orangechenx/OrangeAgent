@@ -69,8 +69,8 @@ class TestPublish:
         client.post("/api/v1/publish", json=make_msg_dict(type="status", content="thinking"))
         resp = client.get("/api/v1/history")
         messages = resp.json()
-        non_status = [m for m in messages if m["type"] != "status"]
-        assert len(non_status) == 0
+        # status 已入库（24h 后自动清理）
+        assert any(m["type"] == "status" for m in messages)
 
     def test_publish_invalid_message_returns_422(self, client):
         resp = client.post("/api/v1/publish", json={"invalid": "data"})

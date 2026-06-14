@@ -21,8 +21,7 @@ if TYPE_CHECKING:
     from orangeagent.runtime.store import SQLiteRuntimeStore  # noqa: F401
 
 _DEFAULT_QUEUE_MAXSIZE = 200
-_STATUS_CACHE_TTL = 30  # status 内存缓存时长（秒）
-_STATUS_CACHE_MAX = 100
+_STATUS_PURGE_HOURS = 24  # status 消息保留时长
 
 
 class LocalMessageBus(MessageBus):
@@ -30,7 +29,7 @@ class LocalMessageBus(MessageBus):
         from orangeagent.runtime.store import SQLiteRuntimeStore
         self._store = SQLiteRuntimeStore(db_path)
         self._queue_maxsize = queue_maxsize
-        self._status_cache: deque[tuple[float, Message]] = deque(maxlen=_STATUS_CACHE_MAX)
+        self._last_status_purge: float = 0  # 上次清理 status 的时间戳
         self._subscribers: dict[str, asyncio.Queue[Message]] = {}
         self._observers: list[asyncio.Queue[Message]] = []
 
@@ -63,24 +62,23 @@ class LocalMessageBus(MessageBus):
 
     async def publish(self, msg: Message) -> None:
         msg = await self._store.prepare_message(msg)
-        if msg.type != "status":
-            await self._store.persist_message_with_runtime(msg)
-        else:
-            self._cache_status(msg)
+        await self._store.persist_message_with_runtime(msg)
+        if msg.type == "status":
+            await self._maybe_purge_old_status()
         self._dispatch(msg)
 
-    def _cache_status(self, msg: Message) -> None:
-        """缓存 status 消息到内存环形缓冲区（带 TTL）。"""
+    async def _maybe_purge_old_status(self) -> None:
+        """定期清理超过 24h 的 status 消息（惰性，每分钟最多一次）。"""
+        import time
         now = time.monotonic()
-        self._status_cache.append((now, msg))
-        # 惰性清理过期缓存
-        while self._status_cache and now - self._status_cache[0][0] > _STATUS_CACHE_TTL:
-            self._status_cache.popleft()
-
-    def get_recent_status(self, max_age: float = _STATUS_CACHE_TTL) -> list[Message]:
-        """获取近期 status 消息（供新 observer 初始化用）。"""
-        now = time.monotonic()
-        return [msg for t, msg in self._status_cache if now - t <= max_age]
+        if now - self._last_status_purge < 60:
+            return
+        self._last_status_purge = now
+        db = self._store._db
+        if db:
+            sql = "DELETE FROM messages WHERE type = 'status' AND timestamp < datetime('now', '-' || ? || ' hours')"
+            async with db.execute(sql, (_STATUS_PURGE_HOURS,)):
+                pass
 
     async def get_history(
         self,

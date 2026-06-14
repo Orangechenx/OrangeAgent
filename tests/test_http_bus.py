@@ -291,7 +291,7 @@ async def test_integration_status_not_persisted(server_fixture):
     await bus.publish(status_msg)
 
     after = len(await bus.get_history())
-    assert after == before  # status was NOT persisted
+    assert after == before + 1  # status 已入库
 
     await bus.close()
 

@@ -36,5 +36,5 @@ def resolve_recipients(msg: Message, active_agent_ids: set[str]) -> set[str]:
 
 
 def should_persist(msg: Message) -> bool:
-    """Status messages are never persisted to SQLite."""
-    return msg.type != "status"
+    """所有消息都入库（status 24h 后自动清理）。"""
+    return True
