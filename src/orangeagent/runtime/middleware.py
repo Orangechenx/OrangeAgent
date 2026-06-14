@@ -235,3 +235,73 @@ def inject_context_middleware(
         name="inject_context",
         request_handler=on_request,
     )
+
+
+# ── ToolStormBreaker（参考 Kun ToolStormBreaker） ─────────
+
+
+class ToolStormBreaker:
+    """工具风暴抑制器：检测并抑制重复工具调用。
+
+    在逆向场景中，Agent 经常对 trace/JADX 反复搜索相似内容，
+    浪费大量 token。StormBreaker 维护一个滑动窗口，
+    相同工具+相同参数出现超过阈值时自动抑制。
+
+    参考 Kun tool-storm-breaker.ts 设计。
+    """
+
+    def __init__(
+        self,
+        window_size: int = 8,
+        threshold: int = 3,
+        exempt_tools: set[str] | None = None,
+    ) -> None:
+        self._window: list[tuple[str, frozenset[tuple[str, Any]]]] = []
+        self._window_size = window_size
+        self._threshold = threshold
+        self._exempt = exempt_tools or {"hypothesis_create", "hypothesis_verify",
+                                        "hypothesis_reject", "hypothesis_list"}
+
+    def check(self, name: str, arguments: dict[str, Any]) -> bool:
+        """检查是否应该抑制此调用。返回 True = 抑制。"""
+        if name in self._exempt:
+            return False
+
+        sig = (name, _freeze_args(arguments))
+        self._window.append(sig)
+        if len(self._window) > self._window_size:
+            self._window.pop(0)
+
+        count = sum(1 for s in self._window if s == sig)
+        return count >= self._threshold
+
+    def reset(self) -> None:
+        """重置窗口（新 turn 时调用）。"""
+        self._window.clear()
+
+
+def _freeze_args(args: dict[str, Any]) -> frozenset[tuple[str, Any]]:
+    """冻结参数字典用于比较。"""
+    items: list[tuple[str, Any]] = []
+    for k, v in sorted(args.items()):
+        if isinstance(v, str) and len(v) > 200:
+            v = v[:200]  # 只比较前 200 字符
+        items.append((k, v))
+    return frozenset(items)
+
+
+def storm_breaker_middleware(
+    breaker: ToolStormBreaker | None = None,
+) -> MiddlewareHandler:
+    """创建工具风暴抑制中间件。"""
+    _breaker = breaker or ToolStormBreaker()
+
+    def on_request(name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        if _breaker.check(name, args):
+            return None  # 阻止调用
+        return args
+
+    return MiddlewareHandler(
+        name="storm_breaker",
+        request_handler=on_request,
+    )

@@ -8,6 +8,7 @@ from .hypothesis_tools import (  # noqa: F401 — @tool 装饰器自注册
     hypothesis_create, hypothesis_verify, hypothesis_reject,
     hypothesis_list, hypothesis_check_dead_end,
 )
+from .skill_loader import set_skill_store  # noqa: F401
 from .trace_executor import LocalTraceToolExecutor
 from .jadx_executor import JadxToolExecutor
 from .frida_executor import FridaToolExecutor

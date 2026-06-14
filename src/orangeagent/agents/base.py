@@ -15,9 +15,13 @@ from orangeagent.runtime.event import (
     agent_status_event, llm_call_event, tool_call_event, cache_info_event,
 )
 from orangeagent.runtime.guardrails import check_tool_policy
-from orangeagent.runtime.middleware import MiddlewarePipeline, MiddlewareResult, audit_middleware
+from orangeagent.runtime.middleware import (
+    MiddlewarePipeline, MiddlewareResult, audit_middleware,
+    storm_breaker_middleware,
+)
 from orangeagent.runtime.models import RunStepRecord, ToolCallRecord
 from orangeagent.runtime.skill_store import SkillStore
+from orangeagent.tools.skill_loader import set_skill_store as _init_skill_store
 from orangeagent.runtime.sop import build_reverse_sop_context
 from orangeagent.verify import hard_verify, VerificationError, self_check
 
@@ -99,9 +103,12 @@ class BaseAgent:
         self._middleware = middleware or MiddlewarePipeline(sink=self._sink)
         if enable_default_middleware:
             self._middleware.use(audit_middleware(sink=self._sink))
+            self._middleware.use(storm_breaker_middleware())
         # 技能系统
         self._skill_store = skill_store
         self._skill_tags = skill_tags or []
+        if skill_store is not None:
+            _init_skill_store(skill_store)
         # 记忆注入缓存
         self._composed_prompt: str | None = None
         self._memory_block: str | None = None
