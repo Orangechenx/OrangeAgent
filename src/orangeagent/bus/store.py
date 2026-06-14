@@ -1,4 +1,6 @@
 import asyncio
+import time
+from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +21,8 @@ if TYPE_CHECKING:
     from orangeagent.runtime.store import SQLiteRuntimeStore  # noqa: F401
 
 _DEFAULT_QUEUE_MAXSIZE = 200
+_STATUS_CACHE_TTL = 30  # status 内存缓存时长（秒）
+_STATUS_CACHE_MAX = 100
 
 
 class LocalMessageBus(MessageBus):
@@ -26,6 +30,7 @@ class LocalMessageBus(MessageBus):
         from orangeagent.runtime.store import SQLiteRuntimeStore
         self._store = SQLiteRuntimeStore(db_path)
         self._queue_maxsize = queue_maxsize
+        self._status_cache: deque[tuple[float, Message]] = deque(maxlen=_STATUS_CACHE_MAX)
         self._subscribers: dict[str, asyncio.Queue[Message]] = {}
         self._observers: list[asyncio.Queue[Message]] = []
 
@@ -60,7 +65,22 @@ class LocalMessageBus(MessageBus):
         msg = await self._store.prepare_message(msg)
         if msg.type != "status":
             await self._store.persist_message_with_runtime(msg)
+        else:
+            self._cache_status(msg)
         self._dispatch(msg)
+
+    def _cache_status(self, msg: Message) -> None:
+        """缓存 status 消息到内存环形缓冲区（带 TTL）。"""
+        now = time.monotonic()
+        self._status_cache.append((now, msg))
+        # 惰性清理过期缓存
+        while self._status_cache and now - self._status_cache[0][0] > _STATUS_CACHE_TTL:
+            self._status_cache.popleft()
+
+    def get_recent_status(self, max_age: float = _STATUS_CACHE_TTL) -> list[Message]:
+        """获取近期 status 消息（供新 observer 初始化用）。"""
+        now = time.monotonic()
+        return [msg for t, msg in self._status_cache if now - t <= max_age]
 
     async def get_history(
         self,
