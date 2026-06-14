@@ -1,26 +1,61 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["fastmcp>=3.0.2"]
+# dependencies = ["fastmcp>=3.0.2", "python-dotenv"]
 # ///
 """
-OrangeAgent MCP Server — 将发现循环和假设追踪注入 Claude Code。
+OrangeAgent MCP Server — 将发现循环和假设追踪注入任意 MCP 兼容 AI。
 
-安装:
-  在 ~/code/.claude/settings.json 中添加:
-  {
-    "mcpServers": {
-      "orange-agent": {
-        "command": "uv",
-        "args": ["--directory", "/path/to/OrangeAgent", "run", "mcp-server.py"]
-      }
+支持 Claude Code、Cursor、Windsurf 等所有支持 MCP 协议的 AI 客户端。
+
+## 安装
+
+在 AI 客户端的 MCP 配置中添加:
+
+### Claude Code (~/code/.claude/settings.json)
+```json
+{
+  "mcpServers": {
+    "orange-agent": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/OrangeAgent", "run", "orange_mcp.py"]
     }
   }
+}
+```
 
-Claude 就能用以下工具:
-  - hypothesis_create / verify / reject / list / check_dead_end
-  - load_skill
-  - orange_analyze (跑完整发现循环)
+### Cursor (.cursor/mcp.json)
+```json
+{
+  "mcpServers": {
+    "orange-agent": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/OrangeAgent", "run", "orange_mcp.py"]
+    }
+  }
+}
+```
+
+## 环境变量
+
+在 OrangeAgent 目录下的 .env 文件中配置:
+
+```bash
+# LLM API Key（至少配一个）
+OPENAI_API_KEY=sk-xxx
+ANTHROPIC_API_KEY=sk-xxx
+
+# OrangeAgent 配置（可选）
+ORANGEAGENT_LITELLM_MODEL=openai/gpt-4o
+ORANGEAGENT_TRACE_CODE_FILE=/path/to/code.log
+```
+
+## 可用工具
+
+- hypothesis_create / verify / reject / list / check_dead_end — 假设追踪
+- skills_list / load_skill — 技能系统
+- orange_analyze — 提交分析任务
+- orange_status — 查看系统状态
 """
 
 import json
@@ -28,10 +63,20 @@ import sys
 import os
 from pathlib import Path
 
-# 确保能找到 orangeagent 包
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+# ── 1. 环境初始化 ──
 
-import os
+# 切换到脚本所在目录，确保 .env 能加载
+_SCRIPT_DIR = Path(__file__).resolve().parent
+os.chdir(_SCRIPT_DIR)
+
+# 加载 .env（优先项目目录，再找 home 目录）
+from dotenv import load_dotenv
+_env_loaded = load_dotenv(_SCRIPT_DIR / ".env") or load_dotenv()
+_has_api_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_BASE"))
+
+# 确保能找到 orangeagent 包
+sys.path.insert(0, str(_SCRIPT_DIR / "src"))
+
 os.environ.setdefault("FASTMCP_LOG_LEVEL", "WARNING")
 
 from fastmcp import FastMCP
@@ -173,6 +218,31 @@ def orange_analyze(task: str, session_id: str = "default") -> str:
             "3. @hypothesis_verify 或 @hypothesis_reject",
             "4. @hypothesis_check_dead_end 避免重复",
             "5. @skills_list 或 @load_skill 获取技能指导",
+        ],
+    }, ensure_ascii=False)
+
+
+@mcp.tool()
+def orange_status() -> str:
+    """查看 OrangeAgent MCP 服务器的配置和运行状态。"""
+    store = _get_skill_store()
+    return json.dumps({
+        "status": "ok",
+        "version": "0.2.0",
+        "env_loaded": _env_loaded,
+        "has_api_key": _has_api_key,
+        "has_trace_files": any((
+            os.environ.get("ORANGEAGENT_TRACE_CODE_FILE") or "",
+            os.environ.get("ORANGEAGENT_TRACE_RW_FILE") or "",
+            os.environ.get("ORANGEAGENT_TRACE_BL_FILE") or "",
+        )),
+        "project_dir": str(_SCRIPT_DIR),
+        "skills_count": store.count,
+        "skills": [s.name for s in store.list_all()],
+        "tools": [
+            "hypothesis_create", "hypothesis_verify", "hypothesis_reject",
+            "hypothesis_list", "hypothesis_check_dead_end",
+            "skills_list", "load_skill", "orange_analyze",
         ],
     }, ensure_ascii=False)
 
