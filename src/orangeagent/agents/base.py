@@ -232,31 +232,15 @@ class BaseAgent:
         return "\n\n".join(parts)
 
     def _build_skills_block(self) -> str:
-        """从技能库中匹配合适的技能，格式化为提示文本。
+        """构建技能目录，注入 system prompt。
 
         如果 skill_tags 为空，返回所有技能（适用于 main_agent）。
         如果 skill_tags 有值，只返回匹配的技能。
         """
         if not self._skill_store:
             return ""
-        if self._skill_tags:
-            matched = self._skill_store.find_by_tags(self._skill_tags)
-        else:
-            matched = self._skill_store.list_all()
-        if not matched:
-            return ""
-        lines = ["## 📋 匹配的逆向技能", "以下技能可能与当前任务相关："]
-        for s in matched:
-            lines.append(f"\n### {s.name}")
-            lines.append(f"  描述: {s.description}")
-            lines.append(f"  标签: {', '.join(s.tags)}")
-            for step in s.steps[:4]:  # 最多展示 4 步
-                tool_name = step.get("tool", "?")
-                desc = step.get("description", "")
-                lines.append(f"  - `{tool_name}`: {desc}")
-            if len(s.steps) > 4:
-                lines.append(f"  - …还有 {len(s.steps) - 4} 步")
-        return "\n".join(lines)
+        # 使用 catalog_instruction 生成格式化目录
+        return self._skill_store.catalog_instruction(budget=4000)
 
     def invalidate_composed_prompt(self) -> None:
         """记忆变更时失效缓存，下次 think() 重建。"""
@@ -582,6 +566,18 @@ class BaseAgent:
             return []
         matched = self._skill_store.find_by_tags(tags=tags or [], applies_to=applies_to)
         return [s.to_dict() for s in matched]
+
+    def resolve_skills_for_prompt(self, prompt: str) -> list[dict]:
+        """针对用户输入解析匹配的技能（Kun 风格评分）。"""
+        if self._skill_store is None:
+            return []
+        resolution = self._skill_store.resolve_turn(
+            prompt, tags=self._skill_tags or None, active_limit=3,
+        )
+        return [
+            {"name": m.skill.name, "score": m.score, "reason": m.reason}
+            for m in resolution.active
+        ]
 
     async def _record_tool_call(
         self,

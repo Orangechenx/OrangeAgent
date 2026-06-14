@@ -1,0 +1,10 @@
+{
+  "name": "vmp-dump-assist",
+  "description": "辅助识别和应对 DEX VMP 保护的流程",
+  "tags": ["vmp", "脱壳", "dex-vmp"],
+  "priority": 8,
+  "entry": "SKILL.md",
+  "triggers": {
+    "patterns": ["vmp", "脱壳", "libDexHelper", "dexguard", "加壳"]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "bypass-ssl-pinning",
+  "description": "通用 SSL Pinning 绕过流程，覆盖常见框架和自定义 TrustManager",
+  "tags": ["ssl", "network", "hook", "抓包"],
+  "priority": 10,
+  "entry": "SKILL.md",
+  "triggers": {
+    "commands": ["/ssl", "/pinning"],
+    "patterns": ["ssl pinning", "证书绑定", "无法抓包", "https抓不到"]
+  }
+}

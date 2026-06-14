@@ -27,6 +27,7 @@ class EventKind(str, Enum):
     MEMORY_EXTRACTED = "memory_extracted"  # 记忆提取
     MIDDLEWARE = "middleware"           # 中间件拦截
     SKILL_MATCHED = "skill_matched"     # 技能匹配
+    HYPOTHESIS = "hypothesis"           # 假设追踪
 
 
 @dataclass

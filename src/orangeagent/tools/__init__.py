@@ -4,7 +4,10 @@
 新模式：通过 registry 自注册，Agent 自动发现。
 """
 
-from .protocol import ToolExecutor
+from .hypothesis_tools import (  # noqa: F401 — @tool 装饰器自注册
+    hypothesis_create, hypothesis_verify, hypothesis_reject,
+    hypothesis_list, hypothesis_check_dead_end,
+)
 from .trace_executor import LocalTraceToolExecutor
 from .jadx_executor import JadxToolExecutor
 from .frida_executor import FridaToolExecutor
