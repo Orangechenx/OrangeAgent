@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+import select
 import subprocess
 from pathlib import Path
 from typing import Any
+
+# daemon 单行响应最长等待秒数：超过即判定卡死，避免 readline 永久阻塞整个进程
+_DAEMON_READ_TIMEOUT = 30.0
 
 
 class LocalTraceToolExecutor:
@@ -48,6 +52,23 @@ class LocalTraceToolExecutor:
         if not search_dir.is_dir():
             raise FileNotFoundError(f"Search tool directory not found: {search_dir}")
         subprocess.run(["make"], cwd=search_dir, check=True, capture_output=True, text=True)
+
+    def _readline_timeout(self, daemon: subprocess.Popen[str], file_key: str) -> str:
+        """带超时的 readline：daemon 卡死（崩溃未关 stdout / IO 阻塞）时不再永久挂起。
+
+        daemon 协议为逐行 JSON 且每行写完即 flush，POSIX pipe 支持 select，
+        因此用 select 轮询 fd 可读性即可，不会出现半行误判。
+        超时则强制关闭 daemon 并抛错，由上层走重试或返回错误。
+        """
+        stdout = daemon.stdout
+        assert stdout is not None
+        ready, _, _ = select.select([stdout], [], [], _DAEMON_READ_TIMEOUT)
+        if not ready:
+            self._close_daemon(file_key)
+            raise TimeoutError(
+                f"Daemon ({file_key}) 在 {_DAEMON_READ_TIMEOUT:.0f}s 内无响应，已强制关闭"
+            )
+        return stdout.readline()
 
     def _close_daemon(self, file_key: str) -> None:
         daemon = self._daemons.pop(file_key, None)
@@ -93,6 +114,14 @@ class LocalTraceToolExecutor:
             daemon.kill()
             raise RuntimeError(f"Daemon ({file_key}) has no stdout")
 
+        # 启动握手同样加超时：daemon 启动后若卡住不写 ready 行，
+        # 不能让 readline 永久阻塞（此时 daemon 尚未登记到 self._daemons）
+        h_ready, _, _ = select.select([daemon.stdout], [], [], _DAEMON_READ_TIMEOUT)
+        if not h_ready:
+            daemon.kill()
+            raise TimeoutError(
+                f"Daemon ({file_key}) 启动 {_DAEMON_READ_TIMEOUT:.0f}s 内无握手响应"
+            )
         ready_line = daemon.stdout.readline()
         if not ready_line:
             stderr = daemon.stderr.read() if daemon.stderr else ""
@@ -126,7 +155,7 @@ class LocalTraceToolExecutor:
         chars = 0
         truncated = False
         while True:
-            line = daemon.stdout.readline()
+            line = self._readline_timeout(daemon, file_key)
             if not line:
                 self._close_daemon(file_key)
                 if retry:

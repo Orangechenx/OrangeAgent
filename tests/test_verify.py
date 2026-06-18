@@ -109,3 +109,41 @@ async def test_self_check_skips_non_conclusion():
     )
     result = await self_check(msg, model="test-model")
     assert result.passed is True
+
+
+@pytest.mark.asyncio
+async def test_self_check_accepts_non_pass_positive_reply():
+    """正面但非 PASS 前缀的回复不应被误判为失败（回归）。"""
+    msg = Message(
+        from_agent="trace_agent",
+        to_agent="main_agent",
+        type="conclusion",
+        content="AES-128-CBC identified",
+        evidence=["line 42: aese v0.16b, v1.16b"],
+        confidence="high",
+    )
+    with patch("orangeagent.verify.self_check.litellm.acompletion") as mock:
+        mock.return_value = AsyncMock(
+            choices=[AsyncMock(message=AsyncMock(content="推理链合理，证据充分，结论可信"))]
+        )
+        result = await self_check(msg, model="test-model")
+    assert result.passed is True
+
+
+@pytest.mark.asyncio
+async def test_self_check_fails_on_negative_markers_without_prefix():
+    """无 FAIL 前缀但含明确否定信号的回复应判失败。"""
+    msg = Message(
+        from_agent="trace_agent",
+        to_agent="main_agent",
+        type="conclusion",
+        content="AES-128-CBC identified",
+        evidence=["line 42"],
+        confidence="high",
+    )
+    with patch("orangeagent.verify.self_check.litellm.acompletion") as mock:
+        mock.return_value = AsyncMock(
+            choices=[AsyncMock(message=AsyncMock(content="这里存在逻辑漏洞，单行无法支持结论"))]
+        )
+        result = await self_check(msg, model="test-model")
+    assert result.passed is False

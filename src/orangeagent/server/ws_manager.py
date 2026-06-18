@@ -29,9 +29,22 @@ class ConnectionManager:
 
     async def connect_agent(self, ws: WebSocket, agent_id: str) -> None:
         await ws.accept()
+        # 重连时同一 agent_id 会顶替旧连接：先关掉旧 ws，
+        # 否则旧连接的 handler 仍阻塞在 receive_text，最终断开时
+        # 它的 finally 会把新连接从注册表删掉，导致 agent 静默失联
+        old = self._agents.get(agent_id)
+        if old is not None and old is not ws:
+            try:
+                await old.close()
+            except Exception:
+                pass
         self._agents[agent_id] = ws
 
-    def disconnect_agent(self, agent_id: str) -> None:
+    def disconnect_agent(self, agent_id: str, ws: WebSocket | None = None) -> None:
+        # 按身份校验：只有当注册表里这条 ws 确实是调用方自己时才删，
+        # 避免旧连接断开时误删已重连的新连接
+        if ws is not None and self._agents.get(agent_id) is not ws:
+            return
         self._agents.pop(agent_id, None)
 
     async def connect_observer(self, ws: WebSocket) -> None:

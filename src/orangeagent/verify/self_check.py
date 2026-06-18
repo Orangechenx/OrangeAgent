@@ -44,7 +44,16 @@ async def self_check(msg: Message, model: str) -> CheckResult:
 
     reply = response.choices[0].message.content.strip()
 
-    if reply.upper().startswith("PASS"):
+    # 判定策略：只有明确 FAIL 才拦截，其余放行。
+    # 旧实现只认 "PASS" 前缀，会把 "OK:..."/"CORRECT:..." 等正面回复误判为失败、
+    # 触发不必要的重试，重试耗尽后还可能拒发正确结论。
+    upper = reply.upper()
+    if upper.startswith("PASS"):
         return CheckResult(passed=True, reason=reply)
-    else:
+    if upper.startswith("FAIL"):
         return CheckResult(passed=False, reason=reply)
+    # 非标准格式：扫描明确的否定信号，命中才判失败
+    fail_markers = ("逻辑漏洞", "证据不足", "不充分", "矛盾", "无法支持", "存在问题")
+    if any(m in reply for m in fail_markers):
+        return CheckResult(passed=False, reason=reply)
+    return CheckResult(passed=True, reason=reply)

@@ -281,9 +281,16 @@ class ToolStormBreaker:
 
 
 def _freeze_args(args: dict[str, Any]) -> frozenset[tuple[str, Any]]:
-    """冻结参数字典用于比较。"""
+    """冻结参数字典用于比较。
+
+    非标量值（list/dict）不可 hash，直接放进 frozenset 会抛 TypeError，
+    异常被上层吞掉后 storm_breaker 静默失效。这里统一 JSON 序列化为字符串，
+    再按长度截断，保证所有值都可 hash。"""
     items: list[tuple[str, Any]] = []
     for k, v in sorted(args.items()):
+        if not isinstance(v, (str, int, float, bool, type(None))):
+            # list/dict 等复杂值序列化成稳定字符串（sort_keys 保证同内容同结果）
+            v = json.dumps(v, ensure_ascii=False, sort_keys=True)
         if isinstance(v, str) and len(v) > 200:
             v = v[:200]  # 只比较前 200 字符
         items.append((k, v))

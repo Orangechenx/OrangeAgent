@@ -89,6 +89,16 @@ class FridaToolExecutor:
             return self._frida.get_device(device_id)
         return self._frida.get_usb_device(timeout=5)
 
+    @staticmethod
+    def _resolve_target(pid: Any) -> Any:
+        """归一化 attach 目标：纯数字按 pid（int）处理，否则按包名（str）。
+
+        LLM 可能把 pid 传成 JSON number（int），旧代码直接 pid.isdigit() 会抛
+        AttributeError。这里统一转 str 再判定，兼容 int / str 两种输入。
+        """
+        s = str(pid).strip()
+        return int(s) if s.isdigit() else s
+
     def _list_devices(self) -> str:
         self._ensure_frida()
         devices = self._frida.enumerate_devices()
@@ -111,8 +121,8 @@ class FridaToolExecutor:
 
     def _enumerate_classes(self, args: dict[str, Any]) -> str:
         device = self._get_device(args.get("device_id"))
-        pid = args.get("pid", "")
-        session = device.attach(int(pid) if pid.isdigit() else pid)
+        target = self._resolve_target(args.get("pid", ""))
+        session = device.attach(target)
         try:
             script = session.create_script(_ENUMERATE_CLASSES_SCRIPT)
             result = []
@@ -142,7 +152,6 @@ class FridaToolExecutor:
     def _hook_method(self, args: dict[str, Any]) -> str:
         """注入 Hook 并返回一次调用的结果。"""
         device = self._get_device(args.get("device_id"))
-        pid = args.get("pid", "")
         class_name = args.get("class", "")
         method_name = args.get("method", "")
 
@@ -153,7 +162,7 @@ class FridaToolExecutor:
             class_name=class_name,
             method_name=method_name,
         )
-        session = device.attach(int(pid) if pid.isdigit() else pid)
+        session = device.attach(self._resolve_target(args.get("pid", "")))
         try:
             script = session.create_script(script_body)
             results = []

@@ -301,6 +301,9 @@ class BaseAgent:
             {"role": "system", "content": self.effective_system_prompt},
             {"role": "user", "content": input_text},
         ]
+        # context 每次 think() 新建，压缩计数器必须同步归零，
+        # 否则上一轮残留的 _last_compact_len 会让本轮推迟首次压缩、白白多吃 token
+        self._last_compact_len = 0
         await self._broadcast_status("thinking", task_summary=input_text[:80])
         if session_id and run_id:
             await self._record_run_step(
@@ -507,7 +510,13 @@ class BaseAgent:
                         result = json.dumps({"status": "error", "error": error}, ensure_ascii=False)
                     else:
                         try:
-                            result = tool_executor.execute(name, arguments)
+                            # executor.execute() 是同步阻塞调用（内部跑 subprocess/HTTP），
+                            # 直接 await 会卡死事件循环、拖垮所有并发 agent；
+                            # 丢到默认线程池里跑，让出事件循环
+                            loop = asyncio.get_event_loop()
+                            result = await loop.run_in_executor(
+                                None, tool_executor.execute, name, arguments,
+                            )
                         except Exception as exc:
                             status = "error"
                             error = str(exc)
@@ -562,6 +571,13 @@ class BaseAgent:
         # 保留 system + 首条 user
         preserved = context[:2]
         tail_start = max(2, len(context) - _MAX_CONTEXT_TOOL_ROUNDS * 2)
+        # 回退切点到非 tool 消息：若 tail_start 落在 role="tool" 上，
+        # 其配对的 assistant[tool_calls] 会被切掉，留下无主 tool 消息，
+        # OpenAI/Claude API 视为协议错误。向前回退直到 tail 不以 tool 开头。
+        while tail_start < len(context) and context[tail_start].get("role") == "tool":
+            tail_start -= 1
+        if tail_start < 2:
+            tail_start = 2
         removed = len(context) - tail_start
         if removed <= 2:
             return
@@ -793,8 +809,10 @@ class BaseAgent:
                     task_id=task_id,
                     run_id=run_id or msg.run_id,
                 )
-                # Re-parse mentions from retry response
-                retry_mentions = self._parse_mentions(retry_response) if mentions else []
+                # 无条件重新解析修正后回复里的 @mention：
+                # 原结论可能没有 mention，但修正后新增了路由目标，
+                # 旧的 `if mentions else []` 会把这些新 mention 丢掉，导致消息无法送达
+                retry_mentions = self._parse_mentions(retry_response)
                 msg = Message(
                     from_agent=self.agent_id,
                     session_id=session_id or msg.session_id,
