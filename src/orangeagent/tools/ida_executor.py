@@ -35,9 +35,19 @@ class IdaToolExecutor:
             return json.dumps({"status": "error", "error": "ida-pro-mcp 未安装"})
         try:
             result = subprocess.run([self._ida_cmd] + args, capture_output=True, text=True, timeout=60)
-            return result.stdout or result.stderr
         except subprocess.TimeoutExpired:
             return json.dumps({"status": "error", "error": "IDA 命令超时"})
+        # 统一封装为 JSON，与其他 executor 保持协议一致；
+        # 旧实现返回裸 stdout，调用方做 json.loads() 会崩溃
+        if result.returncode != 0:
+            return json.dumps({
+                "status": "error",
+                "error": (result.stderr or result.stdout).strip()[:2000],
+            }, ensure_ascii=False)
+        return json.dumps({
+            "status": "ok",
+            "output": (result.stdout or result.stderr).strip(),
+        }, ensure_ascii=False)
 
     def _analyze_function(self, args: dict[str, Any]) -> str:
         return self._run_ida(["--function", args.get("address", args.get("name", ""))])

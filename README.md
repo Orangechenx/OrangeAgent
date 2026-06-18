@@ -36,7 +36,7 @@ uv run orange launch --port 8720
 | **IdaAgent** | ida | 5 | L6 Native | Native 二进制分析 |
 | **UnidbgAgent** | unidbg | 2 | L10-L11 算法 | SO 模拟执行、算法复现 |
 
-> 全部 **42 个工具** · 10 个 toolset · 179 个测试。
+> 全部 **42 个工具** · 10 个 toolset · 197 个测试。
 > Agent 跨工具集调用自动拦截，LLM 不会越界。
 
 ### 通信机制
@@ -293,7 +293,7 @@ ORANGEAGENT_JADX_PORT=8650
 ## 运行测试
 
 ```bash
-uv run pytest tests/ -v                   # 全量 189 个
+uv run pytest tests/ -v                   # 全量 197 个
 uv run pytest tests/test_bus.py -v        # 消息总线
 uv run pytest tests/test_server.py -v     # FastAPI 服务端
 uv run pytest tests/test_new_components.py -v  # 新组件
@@ -322,7 +322,7 @@ src/orangeagent/
 ├── launcher.py     # 多进程一键启动
 └── eval/           # runtime 评分评估
 data/skills/        # 6 个逆向技能（manifest + Stance）
-tests/              # 189 个测试用例
+tests/              # 197 个测试用例
 ```
 
 ## 技术栈

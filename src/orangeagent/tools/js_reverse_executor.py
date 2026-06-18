@@ -11,7 +11,6 @@ import json
 import re
 import subprocess
 import shutil
-import tempfile
 from typing import Any
 
 from orangeagent.tools.registry import tool, get
@@ -93,18 +92,23 @@ class JsReverseExecutor:
             return json.dumps({"status": "error", "error": "需要 code 参数"})
         if not self._node:
             return json.dumps({"status": "ok", "formatted": code, "note": "node 未安装，返回原文"})
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
-            f.write(code)
-            f.flush()
-            try:
-                result = subprocess.run(
-                    [self._node, "-e", f"const b=require('js-beautify');console.log(b(require('fs').readFileSync('{f.name}','utf8')))"],
-                    capture_output=True, text=True, timeout=10,
-                )
-                formatted = result.stdout or code
-            except Exception:
-                formatted = code
-            return json.dumps({"status": "ok", "formatted": formatted[:10000]})
+        # 通过 stdin 把源码喂给 node，不再写临时文件：
+        # 旧实现把 tempfile 路径字面拼进 JS 字符串，Windows 反斜杠/路径含单引号
+        # 会破坏 JS 语法导致静默回退原文；且 delete=False 无清理会泄漏临时文件
+        node_script = (
+            "const b=require('js-beautify');"
+            "let s='';process.stdin.on('data',d=>s+=d);"
+            "process.stdin.on('end',()=>process.stdout.write(b(s)))"
+        )
+        try:
+            result = subprocess.run(
+                [self._node, "-e", node_script],
+                input=code, capture_output=True, text=True, timeout=10,
+            )
+            formatted = result.stdout or code
+        except Exception:
+            formatted = code
+        return json.dumps({"status": "ok", "formatted": formatted[:10000]})
 
     def close(self) -> None:
         pass

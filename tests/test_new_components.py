@@ -26,7 +26,16 @@ class TestRegistry:
     """工具注册表自注册模式测试"""
 
     def setup_method(self) -> None:
+        # 备份全局 registry 真实内容：这些测试会 clear() 全局单例，
+        # 若不在 teardown 还原，会污染后续依赖 registry 的测试（如 guardrails 域解析）
+        from orangeagent.tools import registry as _reg
+        self._registry_backup = dict(_reg._tools)
         clear()
+
+    def teardown_method(self) -> None:
+        from orangeagent.tools import registry as _reg
+        _reg._tools.clear()
+        _reg._tools.update(self._registry_backup)
 
     def test_register_and_get(self):
         """register() + get() 基本功能"""

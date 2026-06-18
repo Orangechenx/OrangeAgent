@@ -218,7 +218,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         except WebSocketDisconnect:
             pass
         finally:
-            ws_manager.disconnect_agent(agent_id)
+            ws_manager.disconnect_agent(agent_id, ws)
 
     elif role == "observer":
         await ws_manager.connect_observer(ws)
